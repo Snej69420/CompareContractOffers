@@ -1,4 +1,5 @@
 import sys
+import copy
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout,
     QPushButton, QFileDialog, QTableView, QTabWidget, QHBoxLayout,
@@ -9,6 +10,10 @@ from PySide6.QtCore import Qt, QAbstractTableModel
 from PySide6.QtGui import QColor, QBrush
 
 from DataHandler import DataHandler
+
+# Import our new AI & UI Classes
+from Matcher import ContractMatcher
+from UserMatching import MappingTab
 
 
 # --- Custom Table Model for displaying Pandas Data ---
@@ -70,24 +75,19 @@ class ContractWidget(QWidget):
     def _setup_ui(self):
         main_layout = QVBoxLayout(self)
 
-        # 1. TOP SECTION: Metadata (Replicating "Werf Info")
+        # 1. TOP SECTION: Metadata
         meta_group = QGroupBox("Werf Informatie")
         meta_layout = QFormLayout()
 
-        # Style for labels to look like the Excel header
         label_style = "font-weight: bold;"
-
-        # Specific keys we want to show first if they exist
         priority_keys = ["Werf Naam", "Werf Status", "Straatnaam en Nummer", "Postcode en Gemeente"]
 
-        # Add priority keys first
         for key in priority_keys:
             if key in self.metadata:
                 lbl_key = QLabel(key + ":")
                 lbl_key.setStyleSheet(label_style)
                 meta_layout.addRow(lbl_key, QLabel(str(self.metadata[key])))
 
-        # Add remaining keys (excluding the ones we just added)
         for key, val in self.metadata.items():
             if key not in priority_keys and key != "Bestandsnaam":
                 lbl_key = QLabel(key + ":")
@@ -108,23 +108,18 @@ class ContractWidget(QWidget):
         self.table_view.horizontalHeader().setStretchLastSection(True)
         self.table_view.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
 
-        # Layout Assembly
-        # We use a splitter so user can resize the meta section vs table section
         splitter = QSplitter(Qt.Orientation.Vertical)
         splitter.addWidget(meta_group)
         splitter.addWidget(self.table_view)
-        splitter.setStretchFactor(1, 1)  # Give table more space
+        splitter.setStretchFactor(1, 1)
 
         main_layout.addWidget(splitter)
 
     def _merge_cells(self):
-        """Merges consecutive rows in the 'Categorie' column."""
         if 'Categorie' not in self.df.columns:
             return
 
         col_idx = self.df.columns.get_loc('Categorie')
-
-        # Iterate over rows to find spans
         start_row = 0
         if self.df.empty: return
 
@@ -133,16 +128,12 @@ class ContractWidget(QWidget):
         for i in range(1, len(self.df)):
             val = self.df.iloc[i, col_idx]
             if val != current_val:
-                # Apply span for the previous block
                 span_size = i - start_row
                 if span_size > 1:
                     self.table_view.setSpan(start_row, col_idx, span_size, 1)
-
-                # Reset
                 current_val = val
                 start_row = i
 
-        # Apply final span
         span_size = len(self.df) - start_row
         if span_size > 1:
             self.table_view.setSpan(start_row, col_idx, span_size, 1)
@@ -157,31 +148,37 @@ class ContractApp(QMainWindow):
         self.resize(1200, 800)
 
         self.data_handler = DataHandler()
-        self._setup_ui()
-
         self.loaded_contracts = []
+
+        self._setup_ui()
 
     def _setup_ui(self):
         central = QWidget()
         self.setCentralWidget(central)
-
         layout = QVBoxLayout(central)
 
         # Toolbar / Buttons
         btn_layout = QHBoxLayout()
+
         self.btn_load = QPushButton("📂 Laad Offertes")
         self.btn_load.setStyleSheet("padding: 8px; font-size: 14px; font-weight: bold;")
         self.btn_load.clicked.connect(self.load_files)
 
+        self.btn_map = QPushButton("🤖 Vergelijk Offertes (AI)")
+        self.btn_map.setStyleSheet("padding: 8px; font-size: 14px; font-weight: bold; color: #0056b3;")
+        self.btn_map.clicked.connect(self.generate_mapping)
+        self.btn_map.setEnabled(False)
+
         self.btn_export = QPushButton("💾 Exporteer Overzicht naar Excel")
         self.btn_export.setStyleSheet("padding: 10px; font-weight: bold; color: green;")
         self.btn_export.clicked.connect(self.export_data)
-        self.btn_export.setEnabled(False)  # Disabled until data is loaded
+        self.btn_export.setEnabled(False)
 
         btn_layout.addWidget(self.btn_load)
+        btn_layout.addWidget(self.btn_map)
         btn_layout.addWidget(self.btn_export)
 
-        # Tab Widget to hold multiple contracts
+        # Tab Widget
         self.tabs = QTabWidget()
         self.tabs.setTabsClosable(True)
         self.tabs.tabCloseRequested.connect(self.close_tab)
@@ -191,68 +188,159 @@ class ContractApp(QMainWindow):
 
     def load_files(self):
         files, _ = QFileDialog.getOpenFileNames(
-            self,
-            "Selecteer Offertes",
-            "",
-            "Excel Files (*.xlsx *.xls)"
+            self, "Selecteer Offertes", "", "Excel Files (*.xlsx *.xls)"
         )
 
-        if not files:
-            return
+        if not files: return
 
         contracts = self.data_handler.load_files(files)
         self.loaded_contracts.extend(contracts)
 
         for contract in contracts:
-            # Create a dedicated tab/page for this contract
             page = ContractWidget(contract)
             tab_name = contract['metadata'].get('Bestandsnaam', 'Unknown')
             self.tabs.addTab(page, tab_name)
 
-        if self.loaded_contracts:
-            self.btn_export.setEnabled(True)
+        self._update_button_states()
 
     def close_tab(self, index):
-        if 0 <= index < len(self.loaded_contracts):
+        # Only delete from memory if it's one of the contract tabs (not the mapping tab)
+        tab_name = self.tabs.tabText(index)
+
+        if tab_name != "⚙️ AI Mapping" and 0 <= index < len(self.loaded_contracts):
             del self.loaded_contracts[index]
 
         self.tabs.removeTab(index)
+        self._update_button_states()
 
-        if not self.loaded_contracts:
-            self.btn_export.setEnabled(False)
+    def _update_button_states(self):
+        has_data = len(self.loaded_contracts) > 0
+        has_multiple = len(self.loaded_contracts) >= 2
+
+        self.btn_export.setEnabled(has_data)
+        self.btn_map.setEnabled(has_multiple)
+
+    def generate_mapping(self):
+        """Runs the semantic matcher and opens the Mapping Tab."""
+        if len(self.loaded_contracts) < 2: return
+
+        # Remove existing mapping tab if present
+        for i in range(self.tabs.count()):
+            if self.tabs.tabText(i) == "⚙️ AI Mapping":
+                self.tabs.removeTab(i)
+                break
+
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            matcher = ContractMatcher()
+            df_master = self.loaded_contracts[0]['data']
+            master_dict = df_master.groupby('Categorie', sort=False)['Naam'].apply(lambda x: list(x.unique())).to_dict()
+
+            target_contracts = {}
+            for i in range(1, len(self.loaded_contracts)):
+                # We use strict naming so we can map it back during export
+                contract_name = f"Contract {i + 1}"
+                df_target = self.loaded_contracts[i]['data']
+
+                t_dict = df_target.groupby('Categorie', sort=False)['Naam'].apply(lambda x: list(x.unique())).to_dict()
+                ai_results = matcher.match_contracts(df_master, df_target)
+
+                target_contracts[contract_name] = {
+                    'data': t_dict,
+                    'ai': ai_results
+                }
+
+            # Create and add the UI Tab
+            self.mapping_tab_widget = MappingTab(master_dict, target_contracts)
+            tab_idx = self.tabs.addTab(self.mapping_tab_widget, "⚙️ AI Mapping")
+            self.tabs.setCurrentIndex(tab_idx)
+
+        except Exception as e:
+            QMessageBox.critical(self, "AI Fout", f"Het genereren van de AI mapping is mislukt:\n{str(e)}")
+        finally:
+            QApplication.restoreOverrideCursor()
 
     def export_data(self):
-        if not self.loaded_contracts:
-            return
+        """Reads mapping, aligns the dataframes via hidden columns, and triggers Excel write."""
+        if not self.loaded_contracts: return
 
         file_path, _ = QFileDialog.getSaveFileName(
             self, "Save Comparison", "Offerte_Vergelijking.xlsx", "Excel Files (*.xlsx)"
         )
+        if not file_path: return
 
-        if not file_path:
-            return
+        export_contracts = copy.deepcopy(self.loaded_contracts)
 
+        # 1. Create hidden alignment columns for ALL contracts
+        for c in export_contracts:
+            c['data']['Align_Cat'] = c['data']['Categorie']
+            c['data']['Align_Naam'] = c['data']['Naam']
+
+        mapping_tab = None
+        for i in range(self.tabs.count()):
+            if self.tabs.tabText(i) == "⚙️ AI Mapping":
+                mapping_tab = self.tabs.widget(i)
+                break
+
+        if mapping_tab:
+            final_mapping = mapping_tab.extract_final_mapping()
+
+            for i in range(1, len(export_contracts)):
+                contract_name = f"Contract {i + 1}"
+                if contract_name not in final_mapping: continue
+
+                df = export_contracts[i]['data'].copy()
+                mapping_for_this_contract = final_mapping[contract_name]
+
+                row_map = {}
+                cat_map = {}
+
+                for m_cat, map_info in mapping_for_this_contract.items():
+                    t_cat = map_info.get('target_cat')
+                    if not t_cat: continue
+
+                    t_cat_clean = str(t_cat).strip()
+                    m_cat_clean = str(m_cat).strip()
+                    cat_map[t_cat_clean] = m_cat_clean
+
+                    for m_item, t_item in map_info.get('items', {}).items():
+                        if t_item:
+                            row_map[(t_cat_clean, str(t_item).strip())] = (m_cat_clean, str(m_item).strip())
+
+                # 2. Apply mapping strictly to the Alignment columns (Leave original Categorie/Naam alone)
+                new_cats = []
+                new_items = []
+
+                for _, row in df.iterrows():
+                    c = str(row['Categorie']).strip()
+                    n = str(row['Naam']).strip()
+
+                    if (c, n) in row_map:
+                        new_c, new_n = row_map[(c, n)]
+                        new_cats.append(new_c)
+                        new_items.append(new_n)
+                    else:
+                        new_cats.append(cat_map.get(c, c))
+                        new_items.append(n)
+
+                df['Align_Cat'] = new_cats
+                df['Align_Naam'] = new_items
+                export_contracts[i]['data'] = df
+
+        # Get visual column width for 'Naam' if possible
         naam_excel_width = None
-
-        # Try to get width from the currently visible tab
         current_widget = self.tabs.currentWidget()
-        if current_widget and isinstance(current_widget, ContractWidget):
+        if isinstance(current_widget, ContractWidget):
             try:
-                # Find the "Naam" column index in the model
                 df_cols = current_widget.df.columns.tolist()
                 if "Naam" in df_cols:
                     col_idx = df_cols.index("Naam")
-
-                    # Get pixel width from the view
-                    px_width = current_widget.table_view.columnWidth(col_idx)
-
-                    # Convert to Excel units (approx 1 char ~ 7 pixels for default font)
-                    naam_excel_width = int(px_width / 7)
+                    naam_excel_width = int(current_widget.table_view.columnWidth(col_idx) / 7)
             except Exception as e:
-                print(f"Could not extract column width: {e}")
+                pass
 
         try:
-            self.data_handler.export_contracts(self.loaded_contracts, file_path, naam_excel_width)
+            self.data_handler.export_contracts(export_contracts, file_path, naam_excel_width)
             QMessageBox.information(self, "Success", f"Export saved to:\n{file_path}")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to export:\n{str(e)}")

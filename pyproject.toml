@@ -10,5 +10,7 @@ dependencies = [
     "pandas>=2.3.3",
     "plotly>=6.5.2",
     "pyside6>=6.10.2",
+    "sentence-transformers>=5.2.3",
+    "torch>=2.10.0",
     "xlsxwriter>=3.2.9",
 ]
