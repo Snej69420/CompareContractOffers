@@ -44,23 +44,87 @@ class ContractMatcher:
             }
         return matches
 
+    def get_composite_matches(self, m_df_subset, t_df_subset):
+        """Calculates AI Text Score and applies penalties for mismatched units."""
+        m_items = m_df_subset.drop_duplicates(subset=['Naam'])
+        t_items = t_df_subset.drop_duplicates(subset=['Naam'])
+
+        m_names = m_items['Naam'].dropna().astype(str).tolist()
+        t_names = t_items['Naam'].dropna().astype(str).tolist()
+
+        text_matches = self.get_all_matches(m_names, t_names)
+
+        for t_idx, t_row in t_items.iterrows():
+            t_name = str(t_row['Naam']).strip()
+            t_unit = str(t_row.get('Eenheid', '')).strip().lower()
+            try:
+                t_qty = float(t_row.get('Aantal', 0))
+            except:
+                t_qty = 0.0
+
+            best_m_name = None
+            best_composite_score = -1
+
+            for m_idx, m_row in m_items.iterrows():
+                m_name = str(m_row['Naam']).strip()
+                m_unit = str(m_row.get('Eenheid', '')).strip().lower()
+                try:
+                    m_qty = float(m_row.get('Aantal', 0))
+                except:
+                    m_qty = 0.0
+
+                # Base Text Score (Weighted at 100% now)
+                base_score = float(text_matches[t_name]['scores'][m_name])
+
+                # UNIT PENALTY: Massive drop if units explicitly do not match
+                unit_penalty = 0.0
+                if t_unit not in ["", "nan", "none"] and m_unit not in ["", "nan", "none"]:
+                    if t_unit != m_unit:
+                        unit_penalty = -0.40  # Heavy penalty for m² vs lm
+
+                # Quantity Bonus: Small tie-breaker bump if quantities match perfectly
+                qty_bonus = 0.0
+                if m_qty > 0 and t_qty > 0:
+                    margin = abs(m_qty - t_qty) / max(m_qty, t_qty)
+                    if margin <= 0.05:
+                        qty_bonus = 0.10
+
+                # Calculate final score (Clamp between 0.0 and 1.0)
+                composite_score = max(0.0, min(round(base_score + unit_penalty + qty_bonus, 3), 1.0))
+
+                text_matches[t_name]['scores'][m_name] = {
+                    'total': composite_score,
+                    'text': round(base_score, 3),
+                    'unit': unit_penalty,  # Now stores the penalty
+                    'qty': qty_bonus
+                }
+
+                if composite_score > best_composite_score:
+                    best_composite_score = composite_score
+                    best_m_name = m_name
+
+            text_matches[t_name]['best_match'] = best_m_name
+
+        return text_matches
+
     def match_contracts(self, master_df, target_df):
         master_cats = master_df['Categorie'].dropna().astype(str).unique().tolist()
         target_cats = target_df['Categorie'].dropna().astype(str).unique().tolist()
 
-        # 1. Full Matrix of Categories
+        # 1. Full Matrix of Categories (Still uses pure text matching)
         category_mapping = self.get_all_matches(master_cats, target_cats)
 
-        # 2. Full Matrix of Items per Category combination
+        # 2. Full Matrix of Items per Category combination (NOW USES COMPOSITE SCORING)
         item_mapping = {}
         for t_cat in target_cats:
             item_mapping[t_cat] = {}
-            t_items = target_df[target_df['Categorie'] == t_cat]['Naam'].dropna().astype(str).unique().tolist()
+            t_subset = target_df[target_df['Categorie'] == t_cat]
 
             for m_cat in master_cats:
-                m_items = master_df[master_df['Categorie'] == m_cat]['Naam'].dropna().astype(str).unique().tolist()
-                # Compute scores between target items and master items FOR THIS SPECIFIC CATEGORY
-                item_mapping[t_cat][m_cat] = self.get_all_matches(m_items, t_items)
+                m_subset = master_df[master_df['Categorie'] == m_cat]
+
+                # Compute composite scores (AI Text + Unit + Qty) for this specific category combination
+                item_mapping[t_cat][m_cat] = self.get_composite_matches(m_subset, t_subset)
 
         return {
             'categories': category_mapping,

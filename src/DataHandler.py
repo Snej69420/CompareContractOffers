@@ -44,7 +44,7 @@ class DataHandler:
 
         df_data = df_data[df_data['Categorie'].notna()]
         df_data = df_data[df_data['Categorie'] != 'Totaal']
-
+        df_data['Categorie'] = df_data['Categorie'].astype(str).str.strip().str.title() # Make lowercase
         cols_to_keep = [c for c in STANDARD_COLUMNS if c in df_data.columns]
         df_data = df_data[cols_to_keep]
 

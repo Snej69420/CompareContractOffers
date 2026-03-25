@@ -1,64 +1,405 @@
 import sys
 from PySide6.QtWidgets import (
-    QApplication, QWidget, QVBoxLayout, QLabel, QScrollArea, QFrame, QGridLayout,
-    QListWidget, QAbstractItemView, QListWidgetItem, QGroupBox, QPushButton
+    QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, QFrame,
+    QListWidget, QAbstractItemView, QListWidgetItem, QPushButton, QSizePolicy
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal, QTimer
+
+# The minimum AI Confidence Score required to auto-match (0.0 to 1.0)
+MATCH_THRESHOLD = 0.40
 
 
 class ColumnRestrictedList(QListWidget):
-    """A custom QListWidget that swaps items instead of stacking them."""
+    itemsChanged = Signal()
 
-    def __init__(self, column_id, is_unmapped=False):
+    def __init__(self, column_id, is_unmapped=False, is_category=False):
         super().__init__()
         self.column_id = column_id
         self.is_unmapped = is_unmapped
+        self.is_category = is_category
 
         self.setDragDropMode(QAbstractItemView.DragDrop)
         self.setDefaultDropAction(Qt.MoveAction)
         self.setSelectionMode(QAbstractItemView.SingleSelection)
         self.setAcceptDrops(True)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
-        # Sizing to make drop zones clear
-        if self.is_unmapped:
-            self.setMinimumHeight(100)
+        if self.is_category:
+            self.setFixedHeight(50)
+            self.setStyleSheet("QListWidget { border: 2px dashed #bbb; border-radius: 5px; background: transparent; }")
         else:
-            self.setFixedHeight(45)  # Keep mapped slots small to visually enforce 1-item capacity
+            self.setFixedHeight(35)
+            if self.is_unmapped:
+                self.setStyleSheet(
+                    "QListWidget { border: 1px dashed #ccc; border-radius: 3px; background: transparent; }")
+            else:
+                self.setStyleSheet(
+                    "QListWidget { border: 1px solid #ddd; border-radius: 3px; background: transparent; }")
 
-        # Use native frame styling that automatically respects Light/Dark OS modes
-        self.setFrameShape(QFrame.StyledPanel)
-        self.setFrameShadow(QFrame.Sunken)
+        self.setFrameShape(QFrame.NoFrame)
 
     def dragEnterEvent(self, event):
         source = event.source()
         if isinstance(source, ColumnRestrictedList) and source.column_id == self.column_id:
-            event.acceptProposedAction()
+            if source.is_category == self.is_category:
+                event.acceptProposedAction()
+            else:
+                event.ignore()
         else:
             event.ignore()
 
     def dropEvent(self, event):
         source = event.source()
-
-        # Don't do anything if dropping in the exact same list
         if source == self:
             super().dropEvent(event)
             return
 
         if isinstance(source, ColumnRestrictedList) and source.column_id == self.column_id:
             item_to_swap_back = None
-
-            # If we are dropping into a standard match slot that already has an item, prepare to swap
-            if not self.is_unmapped and self.count() > 0:
+            if self.count() > 0:
                 item_to_swap_back = self.takeItem(0)
 
-            # Let Qt handle moving the dragged item into this list
             super().dropEvent(event)
 
-            # If there was an item here, throw it back to wherever the new item came from
             if item_to_swap_back:
                 source.addItem(item_to_swap_back)
+
+            self.itemsChanged.emit()
+            if source != self:
+                source.itemsChanged.emit()
         else:
             event.ignore()
+
+
+class CategoryMappingBlock(QWidget):
+    def __init__(self, m_cat, m_items, target_contracts, global_item_groups):
+        super().__init__()
+        self.m_cat = m_cat
+        self.m_items = m_items
+        self.target_contracts = target_contracts
+        self.global_item_groups = global_item_groups
+
+        self.cat_lists = {}
+        self.item_lists = {}
+        self.extra_lists = {}
+        self.extra_row_widgets = []
+
+        self.init_ui()
+
+    def init_ui(self):
+        self.main_layout = QVBoxLayout(self)
+        self.main_layout.setContentsMargins(0, 5, 0, 5)
+        self.main_layout.setSpacing(0)
+
+        cat_layout = QHBoxLayout()
+        cat_layout.setContentsMargins(0, 0, 0, 0)
+
+        master_cat_container = QWidget()
+        master_cat_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        mc_layout = QHBoxLayout(master_cat_container)
+        mc_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.btn_toggle = QPushButton("▼" if self.m_items else "-")
+        self.btn_toggle.setFixedSize(28, 28)
+        self.btn_toggle.clicked.connect(self.toggle_items)
+        if not self.m_items:
+            self.btn_toggle.setEnabled(False)
+
+        lbl_master = QLabel(f"📁 {self.m_cat}")
+        font = lbl_master.font()
+        font.setBold(True)
+        lbl_master.setFont(font)
+
+        mc_layout.addWidget(self.btn_toggle)
+        mc_layout.addWidget(lbl_master)
+        cat_layout.addWidget(master_cat_container, stretch=1)
+
+        for contract_name in self.target_contracts.keys():
+            lst = ColumnRestrictedList(column_id=contract_name, is_category=True)
+            # When category changes, update items underneath it
+            lst.itemsChanged.connect(lambda c=contract_name: QTimer.singleShot(0, lambda: self.update_items(c)))
+            self.cat_lists[contract_name] = lst
+            cat_layout.addWidget(lst, stretch=1)
+
+        self.main_layout.addLayout(cat_layout)
+
+        self.items_widget = QWidget()
+        items_layout = QVBoxLayout(self.items_widget)
+        items_layout.setContentsMargins(0, 5, 0, 15)
+        items_layout.setSpacing(5)
+
+        for m_item in self.m_items:
+            self.item_lists[m_item] = {}
+            row_layout = QHBoxLayout()
+            row_layout.setContentsMargins(0, 0, 0, 0)
+
+            lbl_container = QWidget()
+            lbl_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+            l_layout = QHBoxLayout(lbl_container)
+            l_layout.setContentsMargins(35, 0, 0, 0)
+            l_layout.addWidget(QLabel(f"↳ {m_item}"))
+            row_layout.addWidget(lbl_container, stretch=1)
+
+            for contract_name in self.target_contracts.keys():
+                lst = ColumnRestrictedList(column_id=contract_name, is_category=False)
+                lst.itemsChanged.connect(lambda: QTimer.singleShot(0, self.refresh_scores))
+                self.item_lists[m_item][contract_name] = lst
+                row_layout.addWidget(lst, stretch=1)
+
+            items_layout.addLayout(row_layout)
+
+        lbl_extra = QLabel("<i>Extra Items (Niet in Master)</i>")
+        lbl_extra.setStyleSheet("color: #777; margin-top: 10px; margin-left: 35px;")
+        items_layout.addWidget(lbl_extra)
+
+        self.extra_items_layout = QVBoxLayout()
+        self.extra_items_layout.setContentsMargins(0, 0, 0, 0)
+        self.extra_items_layout.setSpacing(5)
+        items_layout.addLayout(self.extra_items_layout)
+
+        self.add_extra_item_row()
+
+        self.main_layout.addWidget(self.items_widget)
+        self.items_widget.setVisible(False)
+
+    def add_extra_item_row(self):
+        i = len(self.extra_lists)
+        self.extra_lists[i] = {}
+
+        row_widget = QWidget()
+        row_layout = QHBoxLayout(row_widget)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+
+        lbl_container = QWidget()
+        lbl_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        l_layout = QHBoxLayout(lbl_container)
+        l_layout.setContentsMargins(35, 0, 0, 0)
+        lbl = QLabel("↳ Extra")
+        lbl.setStyleSheet("color: #aaa;")
+        l_layout.addWidget(lbl)
+        row_layout.addWidget(lbl_container, stretch=1)
+
+        for contract_name in self.target_contracts.keys():
+            lst = ColumnRestrictedList(column_id=contract_name, is_unmapped=True, is_category=False)
+            lst.itemsChanged.connect(lambda: QTimer.singleShot(0, self.ensure_empty_extra_item_row))
+            lst.itemsChanged.connect(lambda: QTimer.singleShot(0, self.refresh_scores))
+            self.extra_lists[i][contract_name] = lst
+            row_layout.addWidget(lst, stretch=1)
+
+        self.extra_items_layout.addWidget(row_widget)
+        self.extra_row_widgets.append(row_widget)
+
+    def ensure_empty_extra_item_row(self):
+        empty_indices = []
+        for i in range(len(self.extra_lists)):
+            is_empty = all(self.extra_lists[i][c].count() == 0 for c in self.target_contracts.keys())
+            if is_empty:
+                empty_indices.append(i)
+
+        for idx in empty_indices:
+            self.extra_row_widgets[idx].setVisible(False)
+
+        if empty_indices:
+            idx_to_show = empty_indices[0]
+            widget = self.extra_row_widgets[idx_to_show]
+            self.extra_items_layout.removeWidget(widget)
+            self.extra_items_layout.addWidget(widget)
+            widget.setVisible(True)
+        else:
+            self.add_extra_item_row()
+
+    def get_or_create_empty_item_row(self):
+        for i in range(len(self.extra_lists)):
+            is_empty = all(self.extra_lists[i][c].count() == 0 for c in self.target_contracts.keys())
+            if is_empty:
+                if not self.extra_row_widgets[i].isVisible():
+                    self.extra_items_layout.removeWidget(self.extra_row_widgets[i])
+                    self.extra_items_layout.addWidget(self.extra_row_widgets[i])
+                    self.extra_row_widgets[i].setVisible(True)
+                return i
+        self.add_extra_item_row()
+        return len(self.extra_lists) - 1
+
+    def toggle_items(self):
+        is_visible = self.items_widget.isVisible()
+        self.items_widget.setVisible(not is_visible)
+        self.btn_toggle.setText("▶" if is_visible else "▼")
+
+    def update_items(self, contract_name):
+        cat_list = self.cat_lists[contract_name]
+        t_cat = cat_list.item(0).data(Qt.UserRole) if cat_list.count() > 0 else None
+
+        for m_item in self.m_items:
+            self.item_lists[m_item][contract_name].clear()
+        for i in range(len(self.extra_lists)):
+            self.extra_lists[i][contract_name].clear()
+
+        if not t_cat:
+            self.ensure_empty_extra_item_row()
+            return
+
+        contract_info = self.target_contracts[contract_name]
+        target_dict = contract_info['data']
+        ai_mapping = contract_info['ai']
+
+        t_items = target_dict.get(t_cat, [])
+        match_candidates = []
+        unmapped_items = []
+
+        for t_item in t_items:
+            ai_item_match = ai_mapping['items'].get(t_cat, {}).get(self.m_cat, {}).get(t_item, {})
+            scores = ai_item_match.get('scores', {})
+
+            best_m_item = None
+            best_score = -1
+            for m_item in self.m_items:
+                score_data = scores.get(m_item, {})
+                # Safely extract the total score from our new dictionary structure
+                score = score_data.get('total', 0.0) if isinstance(score_data, dict) else float(
+                    score_data if score_data else 0.0)
+
+                if score > best_score:
+                    best_score = score
+                    best_m_item = m_item
+
+            if best_m_item and best_score >= 0.40:  # STRICT MATCH THRESHOLD
+                match_candidates.append({'t_item': t_item, 'm_item': best_m_item, 'score': best_score})
+            else:
+                unmapped_items.append(t_item)
+
+        match_candidates.sort(key=lambda x: x['score'], reverse=True)
+
+        for candidate in match_candidates:
+            t_item = candidate['t_item']
+            m_item = candidate['m_item']
+
+            item_widget = QListWidgetItem(t_item)
+            item_widget.setData(Qt.UserRole, t_item)
+
+            if self.item_lists[m_item][contract_name].count() == 0:
+                self.item_lists[m_item][contract_name].addItem(item_widget)
+            else:
+                unmapped_items.append(t_item)
+
+        for t_item in unmapped_items:
+            group_id = self.global_item_groups.get(t_item)
+            placed = False
+
+            for i in range(len(self.extra_lists)):
+                if not self.extra_row_widgets[i].isVisible(): continue
+
+                row_belongs_to_group = False
+                for other_contract in self.target_contracts.keys():
+                    lst = self.extra_lists[i][other_contract]
+                    if lst.count() > 0:
+                        existing_val = lst.item(0).data(Qt.UserRole)
+                        if self.global_item_groups.get(existing_val) == group_id:
+                            row_belongs_to_group = True
+                            break
+
+                if row_belongs_to_group and self.extra_lists[i][contract_name].count() == 0:
+                    widget = QListWidgetItem(t_item)
+                    widget.setData(Qt.UserRole, t_item)
+                    self.extra_lists[i][contract_name].addItem(widget)
+                    placed = True
+                    break
+
+            if not placed:
+                idx = self.get_or_create_empty_item_row()
+                widget = QListWidgetItem(t_item)
+                widget.setData(Qt.UserRole, t_item)
+                self.extra_lists[idx][contract_name].addItem(widget)
+
+        self.ensure_empty_extra_item_row()
+        self.refresh_scores()
+
+    def refresh_scores(self):
+        """Updates the visible text and TOOLTIPS to explicitly show the composite breakdown."""
+        for contract_name in self.target_contracts.keys():
+            contract_info = self.target_contracts[contract_name]
+            ai_mapping = contract_info['ai']
+
+            cat_list = self.cat_lists[contract_name]
+            t_cat = cat_list.item(0).data(Qt.UserRole) if cat_list.count() > 0 else None
+
+            # 1. Update Master Rows (Shows full composite math breakdown)
+            for m_item in self.m_items:
+                lst = self.item_lists[m_item][contract_name]
+                if lst.count() > 0:
+                    widget = lst.item(0)
+                    t_item = widget.data(Qt.UserRole)
+
+                    score_data = {}
+                    if t_cat:
+                        score_data = ai_mapping['items'].get(t_cat, {}).get(self.m_cat, {}).get(t_item, {}).get(
+                            'scores', {}).get(m_item, {})
+
+                    total = score_data.get('total', 0.0) if isinstance(score_data, dict) else float(
+                        score_data if score_data else 0.0)
+                    text_s = score_data.get('text', 0.0) if isinstance(score_data, dict) else total
+                    unit_p = score_data.get('unit', 0.0) if isinstance(score_data, dict) else 0.0
+                    qty_s = score_data.get('qty', 0.0) if isinstance(score_data, dict) else 0.0
+
+                    tooltip_text = (
+                        f"Vergeleken met Master: '{m_item}'\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"TOTAAL SCORE: {total:.2f}\n"
+                        f"  • Tekst AI Score:  {text_s:.2f}\n"
+                        f"  • Eenheid Penalty: {unit_p:.2f}\n"
+                        f"  • Aantal Bonus:    +{qty_s:.2f}"
+                    )
+
+                    if total >= MATCH_THRESHOLD:
+                        widget.setText(f"⭐ {t_item} ({total:.2f})")
+                        widget.setToolTip(tooltip_text)
+                    else:
+                        widget.setText(f"⚠️ {t_item} ({total:.2f})")
+                        widget.setToolTip(f"WAARSCHUWING: Zeer lage match!\n\n{tooltip_text}")
+
+            # 2. Update Extra Rows (Target-to-Target Exact Matches)
+            for i in range(len(self.extra_lists)):
+                if not self.extra_row_widgets[i].isVisible(): continue
+                lst = self.extra_lists[i][contract_name]
+                if lst.count() > 0:
+                    widget = lst.item(0)
+                    t_item = widget.data(Qt.UserRole)
+                    widget.setText(f"🔗 {t_item} (Exact)")
+                    widget.setToolTip(
+                        "Geen AI nodig: Dit item staat op deze rij omdat de tekst 100% identiek is aan een ander contract.")
+
+    def get_mapping(self):
+        block_mapping = {}
+        for contract_name in self.target_contracts.keys():
+            t_cat = None
+            if self.cat_lists[contract_name].count() > 0:
+                t_cat = self.cat_lists[contract_name].item(0).data(Qt.UserRole)
+
+            item_mapping = {}
+            for m_item in self.m_items:
+                lst = self.item_lists[m_item][contract_name]
+                if lst.count() > 0:
+                    item_mapping[m_item] = lst.item(0).data(Qt.UserRole)
+
+            for i in range(len(self.extra_lists)):
+                if not self.extra_row_widgets[i].isVisible(): continue
+
+                pseudo_master = None
+                for c_name in self.target_contracts.keys():
+                    if self.extra_lists[i][c_name].count() > 0:
+                        pseudo_master = self.extra_lists[i][c_name].item(0).data(Qt.UserRole)
+                        break
+
+                if pseudo_master:
+                    lst = self.extra_lists[i][contract_name]
+                    if lst.count() > 0:
+                        t_item = lst.item(0).data(Qt.UserRole)
+                        item_mapping[pseudo_master] = t_item
+
+            block_mapping[contract_name] = {
+                'target_cat': t_cat,
+                'items': item_mapping
+            }
+        return block_mapping
 
 
 class MappingTab(QWidget):
@@ -67,25 +408,33 @@ class MappingTab(QWidget):
         self.master_dict = master_dict
         self.target_contracts = target_contracts
 
-        self.cat_lists = {}
-        self.cat_unmapped = {}
+        self.blocks = {}
+        self.extra_cat_lists = {}
+        self.extra_cat_widgets = []
 
-        self.item_lists = {}
-        self.item_unmapped = {}
+        self.global_cat_groups = {}
+        self.global_item_groups = {}
 
+        self.build_global_groups()
         self.init_ui()
         self.populate_ai_data()
+
+    def build_global_groups(self):
+        """Pre-calculates exact Target-to-Target matches upfront."""
+        for c_info in self.target_contracts.values():
+            for cat, items in c_info['data'].items():
+                self.global_cat_groups[cat] = str(cat).lower().strip()
+                for item in items:
+                    self.global_item_groups[item] = str(item).lower().strip()
 
     def init_ui(self):
         main_layout = QVBoxLayout(self)
 
         info = QLabel(
-            "<b>Sleep de items om ze te koppelen.</b><br>"
-            "Je kunt items alleen verticaal verplaatsen binnen hun eigen contractkolom. "
-            "Plaats items in het 'Geen Match' vak onderaan als ze niet in de Master thuishoren.<br>"
-            "<i>(Als je een item op een ander item sleept, wisselen ze automatisch van plek)</i>"
+            "<b>Sleep de categorieën en items om ze te koppelen aan de Master.</b><br>"
+            "De score tussen haakjes toont hoe goed het item past bij de Master rij waar het in zit. "
+            "Items met een ⚠️ icoon hebben een erg lage AI score en horen mogelijk thuis in een Extra rij."
         )
-        # Using a slight frame instead of hardcoded background colors for OS theme compatibility
         info.setFrameShape(QFrame.StyledPanel)
         info.setMargin(10)
         main_layout.addWidget(info)
@@ -94,272 +443,230 @@ class MappingTab(QWidget):
         scroll.setWidgetResizable(True)
         scroll_content = QWidget()
         scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setSpacing(0)
 
-        # --- 1. CATEGORY BOARD ---
-        cat_group = QGroupBox("1. Categorieën Koppelen")
-        font = cat_group.font()
-        font.setBold(True)
-        cat_group.setFont(font)
+        header_layout = QHBoxLayout()
+        header_layout.setContentsMargins(0, 0, 0, 10)
 
-        cat_layout = QGridLayout(cat_group)
-        self.build_grid_headers(cat_layout)
+        lbl_master = QLabel("Master (Contract 1)")
+        lbl_master.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        lbl_master.setStyleSheet("font-weight: bold; font-size: 14px;")
+        header_layout.addWidget(lbl_master, stretch=1)
 
-        row_idx = 1
-        for m_cat in self.master_dict.keys():
-            lbl = QLabel(f"📁 {m_cat}")
-            cat_layout.addWidget(lbl, row_idx, 0)
+        for contract_name in self.target_contracts.keys():
+            lbl = QLabel(contract_name)
+            lbl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+            lbl.setStyleSheet("font-weight: bold; font-size: 14px;")
+            header_layout.addWidget(lbl, stretch=1)
 
-            self.cat_lists[m_cat] = {}
-            for col_idx, contract_name in enumerate(self.target_contracts.keys(), start=1):
-                lst = ColumnRestrictedList(column_id=contract_name)
-                self.cat_lists[m_cat][contract_name] = lst
-                cat_layout.addWidget(lst, row_idx, col_idx)
-            row_idx += 1
+        scroll_layout.addLayout(header_layout)
 
-        cat_layout.addWidget(self.create_unmapped_label(), row_idx, 0)
-        for col_idx, contract_name in enumerate(self.target_contracts.keys(), start=1):
-            lst = ColumnRestrictedList(column_id=contract_name, is_unmapped=True)
-            self.cat_unmapped[contract_name] = lst
-            cat_layout.addWidget(lst, row_idx, col_idx)
+        separator = QFrame()
+        separator.setFrameShape(QFrame.HLine)
+        separator.setStyleSheet("color: #aaa;")
+        scroll_layout.addWidget(separator)
 
-        scroll_layout.addWidget(cat_group)
-        scroll_layout.addWidget(QLabel(" "))  # Spacer
-
-        # --- 2. ITEM BOARD ---
-        item_group = QGroupBox("2. Items Koppelen")
-        item_group.setFont(font)
-        item_layout = QGridLayout(item_group)
-        self.build_grid_headers(item_layout)
-
-        row_idx = 1
         for m_cat, m_items in self.master_dict.items():
-            lbl_cat = QLabel(f"--- {m_cat} ---")
-            cat_font = lbl_cat.font()
-            cat_font.setItalic(True)
-            lbl_cat.setFont(cat_font)
-            item_layout.addWidget(lbl_cat, row_idx, 0)
-            row_idx += 1
+            block = CategoryMappingBlock(m_cat, m_items, self.target_contracts, self.global_item_groups)
+            self.blocks[m_cat] = block
+            scroll_layout.addWidget(block)
 
-            for m_item in m_items:
-                lbl = QLabel(f"↳ {m_item}")
-                item_layout.addWidget(lbl, row_idx, 0)
+        unmapped_widget = QWidget()
+        self.unmapped_layout = QVBoxLayout(unmapped_widget)
+        self.unmapped_layout.setContentsMargins(0, 20, 0, 0)
 
-                self.item_lists[m_item] = {}
-                for col_idx, contract_name in enumerate(self.target_contracts.keys(), start=1):
-                    lst = ColumnRestrictedList(column_id=contract_name)
-                    self.item_lists[m_item][contract_name] = lst
-                    item_layout.addWidget(lst, row_idx, col_idx)
-                row_idx += 1
+        lbl_unmapped_head = QLabel("🚫 Extra Categorieën (Niet in Master):")
+        lbl_unmapped_head.setStyleSheet("font-weight: bold;")
+        self.unmapped_layout.addWidget(lbl_unmapped_head)
 
-        item_layout.addWidget(self.create_unmapped_label(), row_idx, 0)
-        for col_idx, contract_name in enumerate(self.target_contracts.keys(), start=1):
-            lst = ColumnRestrictedList(column_id=contract_name, is_unmapped=True)
-            self.item_unmapped[contract_name] = lst
-            item_layout.addWidget(lst, row_idx, col_idx)
+        self.add_extra_cat_row()
 
-        scroll_layout.addWidget(item_group)
+        scroll_layout.addWidget(unmapped_widget)
         scroll_layout.addStretch()
 
         scroll.setWidget(scroll_content)
         main_layout.addWidget(scroll)
 
-    def build_grid_headers(self, grid_layout):
-        lbl_master = QLabel("Master (Contract 1)")
-        f = lbl_master.font()
-        f.setBold(True)
-        lbl_master.setFont(f)
-        grid_layout.addWidget(lbl_master, 0, 0)
+    def add_extra_cat_row(self):
+        i = len(self.extra_cat_lists)
+        self.extra_cat_lists[i] = {}
 
-        for col_idx, contract_name in enumerate(self.target_contracts.keys(), start=1):
-            lbl = QLabel(contract_name)
-            lbl.setFont(f)
-            lbl.setAlignment(Qt.AlignCenter)
-            grid_layout.addWidget(lbl, 0, col_idx)
+        row_widget = QWidget()
+        row_layout = QHBoxLayout(row_widget)
+        row_layout.setContentsMargins(0, 0, 0, 0)
 
-    def create_unmapped_label(self):
-        lbl = QLabel("🚫 Geen Match\n(Unmapped)")
-        f = lbl.font()
-        f.setBold(True)
-        lbl.setFont(f)
-        lbl.setAlignment(Qt.AlignCenter)
-        return lbl
+        lbl_container = QWidget()
+        lbl_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        l_layout = QHBoxLayout(lbl_container)
+        l_layout.setContentsMargins(0, 0, 0, 0)
+        lbl = QLabel("Extra Categorie")
+        lbl.setStyleSheet("color: #aaa;")
+        l_layout.addWidget(lbl)
+        row_layout.addWidget(lbl_container, stretch=1)
+
+        for contract_name in self.target_contracts.keys():
+            lst = ColumnRestrictedList(column_id=contract_name, is_unmapped=True, is_category=True)
+            lst.itemsChanged.connect(lambda: QTimer.singleShot(0, self.ensure_empty_extra_cat_row))
+            lst.itemsChanged.connect(lambda: QTimer.singleShot(0, self.refresh_cat_scores))
+            self.extra_cat_lists[i][contract_name] = lst
+            row_layout.addWidget(lst, stretch=1)
+
+        self.unmapped_layout.addWidget(row_widget)
+        self.extra_cat_widgets.append(row_widget)
+
+    def ensure_empty_extra_cat_row(self):
+        empty_indices = []
+        for i in range(len(self.extra_cat_lists)):
+            is_empty = all(self.extra_cat_lists[i][c].count() == 0 for c in self.target_contracts.keys())
+            if is_empty:
+                empty_indices.append(i)
+
+        for idx in empty_indices:
+            self.extra_cat_widgets[idx].setVisible(False)
+
+        if empty_indices:
+            idx_to_show = empty_indices[0]
+            widget = self.extra_cat_widgets[idx_to_show]
+            self.unmapped_layout.removeWidget(widget)
+            self.unmapped_layout.addWidget(widget)
+            widget.setVisible(True)
+        else:
+            self.add_extra_cat_row()
+
+    def get_or_create_empty_cat_row(self):
+        for i in range(len(self.extra_cat_lists)):
+            is_empty = all(self.extra_cat_lists[i][c].count() == 0 for c in self.target_contracts.keys())
+            if is_empty:
+                if not self.extra_cat_widgets[i].isVisible():
+                    self.unmapped_layout.removeWidget(self.extra_cat_widgets[i])
+                    self.unmapped_layout.addWidget(self.extra_cat_widgets[i])
+                    self.extra_cat_widgets[i].setVisible(True)
+                return i
+
+        self.add_extra_cat_row()
+        return len(self.extra_cat_lists) - 1
 
     def populate_ai_data(self):
-        """Places items based on AI scores, ensuring 1-to-1 matching initially."""
+        unmapped_cats = []
+
         for contract_name, contract_info in self.target_contracts.items():
             target_dict = contract_info['data']
             ai_mapping = contract_info['ai']
 
-            # 1. Populate Categories
+            cat_candidates = []
             for t_cat in target_dict.keys():
                 cat_match_info = ai_mapping['categories'].get(t_cat, {})
                 best_m_cat = cat_match_info.get('best_match')
                 score = cat_match_info.get('scores', {}).get(best_m_cat, 0.0) if best_m_cat else 0.0
+                cat_candidates.append({'t_cat': t_cat, 'm_cat': best_m_cat, 'score': score})
 
-                item_widget = QListWidgetItem(f"⭐ {t_cat}" if best_m_cat and score > 0.1 else t_cat)
+            cat_candidates.sort(key=lambda x: x['score'], reverse=True)
+
+            for candidate in cat_candidates:
+                t_cat = candidate['t_cat']
+                best_m_cat = candidate['m_cat']
+                score = candidate['score']
+
+                item_widget = QListWidgetItem(t_cat)
                 item_widget.setData(Qt.UserRole, t_cat)
 
-                # Assign if good match AND the master slot is currently empty
-                if best_m_cat and score > 0.1 and self.cat_lists[best_m_cat][contract_name].count() == 0:
-                    self.cat_lists[best_m_cat][contract_name].addItem(item_widget)
+                # Use the new MATCH_THRESHOLD
+                if best_m_cat and score >= MATCH_THRESHOLD and self.blocks[best_m_cat].cat_lists[
+                    contract_name].count() == 0:
+                    self.blocks[best_m_cat].cat_lists[contract_name].addItem(item_widget)
                 else:
-                    # Otherwise throw to unmapped
-                    self.cat_unmapped[contract_name].addItem(item_widget)
+                    unmapped_cats.append((contract_name, t_cat))
 
-            # 2. Populate Items
-            for t_cat, t_items in target_dict.items():
-                for t_item in t_items:
-                    best_m_item = None
-                    best_score = -1
+            for block in self.blocks.values():
+                block.update_items(contract_name)
 
-                    for m_cat in self.master_dict.keys():
-                        ai_item_match = ai_mapping['items'].get(t_cat, {}).get(m_cat, {}).get(t_item, {})
-                        scores = ai_item_match.get('scores', {})
+        for contract_name, t_cat in unmapped_cats:
+            group_id = self.global_cat_groups.get(t_cat)
+            placed = False
 
-                        for m_item, score in scores.items():
-                            if score > best_score:
-                                best_score = score
-                                best_m_item = m_item
+            for i in range(len(self.extra_cat_lists)):
+                if not self.extra_cat_widgets[i].isVisible(): continue
+                row_belongs_to_group = False
 
-                    item_widget = QListWidgetItem(f"⭐ {t_item}" if best_m_item and best_score > 0.1 else t_item)
-                    item_widget.setData(Qt.UserRole, t_item)
+                for other_contract in self.target_contracts.keys():
+                    lst = self.extra_cat_lists[i][other_contract]
+                    if lst.count() > 0:
+                        existing_val = lst.item(0).data(Qt.UserRole)
+                        if self.global_cat_groups.get(existing_val) == group_id:
+                            row_belongs_to_group = True
+                            break
 
-                    if best_m_item and best_score > 0.1 and self.item_lists[best_m_item][contract_name].count() == 0:
-                        self.item_lists[best_m_item][contract_name].addItem(item_widget)
+                if row_belongs_to_group and self.extra_cat_lists[i][contract_name].count() == 0:
+                    widget = QListWidgetItem(t_cat)
+                    widget.setData(Qt.UserRole, t_cat)
+                    self.extra_cat_lists[i][contract_name].addItem(widget)
+                    placed = True
+                    break
+
+            if not placed:
+                idx = self.get_or_create_empty_cat_row()
+                widget = QListWidgetItem(t_cat)
+                widget.setData(Qt.UserRole, t_cat)
+                self.extra_cat_lists[idx][contract_name].addItem(widget)
+
+        self.ensure_empty_extra_cat_row()
+        self.refresh_cat_scores()
+
+    def refresh_cat_scores(self):
+        """Updates the visible text on the categories to show AI scores based on their row."""
+        for contract_name in self.target_contracts.keys():
+            ai_mapping = self.target_contracts[contract_name]['ai']
+
+            # Master Categories
+            for m_cat, block in self.blocks.items():
+                lst = block.cat_lists[contract_name]
+                if lst.count() > 0:
+                    widget = lst.item(0)
+                    t_cat = widget.data(Qt.UserRole)
+                    score = ai_mapping['categories'].get(t_cat, {}).get('scores', {}).get(m_cat, 0.0)
+
+                    if score >= MATCH_THRESHOLD:
+                        widget.setText(f"⭐ {t_cat} ({score:.2f})")
+                        widget.setToolTip(f"Good Match vs Master '{m_cat}'")
                     else:
-                        self.item_unmapped[contract_name].addItem(item_widget)
+                        widget.setText(f"⚠️ {t_cat} ({score:.2f})")
+                        widget.setToolTip(f"Poor Match vs Master '{m_cat}'. Consider moving to Extra categorieën.")
+
+            # Extra Categories
+            for i in range(len(self.extra_cat_lists)):
+                if not self.extra_cat_widgets[i].isVisible(): continue
+                lst = self.extra_cat_lists[i][contract_name]
+                if lst.count() > 0:
+                    widget = lst.item(0)
+                    t_cat = widget.data(Qt.UserRole)
+                    widget.setText(f"🔗 {t_cat} (Exact)")
+                    widget.setToolTip("Gegroepeerd via exacte naam overeenkomst met andere targets")
 
     def extract_final_mapping(self):
         final_mapping = {name: {} for name in self.target_contracts.keys()}
 
         for contract_name in self.target_contracts.keys():
-            for m_cat, m_items in self.master_dict.items():
-                cat_list_widget = self.cat_lists[m_cat][contract_name]
-                t_cat = None
+            for m_cat, block in self.blocks.items():
+                block_mapping = block.get_mapping()[contract_name]
+                if block_mapping['target_cat'] or block_mapping['items']:
+                    final_mapping[contract_name][m_cat] = block_mapping
 
-                if cat_list_widget.count() > 0:
-                    t_cat = cat_list_widget.item(0).data(Qt.UserRole)
+        for i in range(len(self.extra_cat_lists)):
+            if not self.extra_cat_widgets[i].isVisible(): continue
 
-                items_dict = {}
-                for m_item in m_items:
-                    item_list_widget = self.item_lists[m_item][contract_name]
-                    if item_list_widget.count() > 0:
-                        t_item = item_list_widget.item(0).data(Qt.UserRole)
-                        items_dict[m_item] = t_item
+            pseudo_master_cat = None
+            for c_name in self.target_contracts.keys():
+                if self.extra_cat_lists[i][c_name].count() > 0:
+                    pseudo_master_cat = self.extra_cat_lists[i][c_name].item(0).data(Qt.UserRole)
+                    break
 
-                if t_cat or items_dict:
-                    final_mapping[contract_name][m_cat] = {
-                        'target_cat': t_cat,
-                        'items': items_dict
-                    }
+            if pseudo_master_cat:
+                for c_name in self.target_contracts.keys():
+                    if self.extra_cat_lists[i][c_name].count() > 0:
+                        t_cat = self.extra_cat_lists[i][c_name].item(0).data(Qt.UserRole)
+                        final_mapping[c_name][pseudo_master_cat] = {
+                            'target_cat': t_cat,
+                            'items': {}
+                        }
 
         return final_mapping
-
-
-if __name__ == "__main__":
-    app = QApplication(sys.argv)
-
-    # 1. Master Contract
-    master_data = {
-        'Grondwerken': ['Graven fundering', 'Afvoer aarde'],
-        'Sanitair': ['Installatie toilet']
-    }
-
-    # 2. Target Contracts mapped into one dictionary (UPDATED TO NEW AI MATRIX FORMAT)
-    target_contracts = {
-        'Contract 2 (Janssens)': {
-            'data': {
-                'Graafwerken': ['Uitgraven sleuven'],
-                'Loodgieterij': ['Plaatsen wc', 'Extra wasbak']
-            },
-            'ai': {
-                'categories': {
-                    'Graafwerken': {
-                        'best_match': 'Grondwerken',
-                        'scores': {'Grondwerken': 0.75, 'Sanitair': 0.22}
-                    },
-                    'Loodgieterij': {
-                        'best_match': 'Sanitair',
-                        'scores': {'Grondwerken': 0.45, 'Sanitair': 0.66}
-                    }
-                },
-                'items': {
-                    'Graafwerken': {
-                        'Grondwerken': {
-                            'Uitgraven sleuven': {
-                                'best_match': 'Graven fundering',
-                                'scores': {'Graven fundering': 0.80, 'Afvoer aarde': 0.52}
-                            }
-                        },
-                        'Sanitair': {
-                            'Uitgraven sleuven': {
-                                'best_match': 'Installatie toilet',
-                                'scores': {'Installatie toilet': 0.15}
-                            }
-                        }
-                    },
-                    'Loodgieterij': {
-                        'Grondwerken': {
-                            'Plaatsen wc': {'best_match': 'Graven fundering', 'scores': {'Graven fundering': 0.12, 'Afvoer aarde': 0.05}},
-                            'Extra wasbak': {'best_match': 'Graven fundering', 'scores': {'Graven fundering': 0.10, 'Afvoer aarde': 0.08}}
-                        },
-                        'Sanitair': {
-                            'Plaatsen wc': {
-                                'best_match': 'Installatie toilet',
-                                'scores': {'Installatie toilet': 0.71}
-                            },
-                            'Extra wasbak': {
-                                'best_match': None,
-                                'scores': {'Installatie toilet': 0.33}
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        'Contract 3 (Peeters)': {
-            'data': {
-                'Grondverzet': ['Fundering graven', 'Zand afvoeren'],
-                'Badkamer': ['Toilet montage']
-            },
-            'ai': {
-                'categories': {
-                    'Grondverzet': {'best_match': 'Grondwerken', 'scores': {'Grondwerken': 0.82, 'Sanitair': 0.11}},
-                    'Badkamer': {'best_match': 'Sanitair', 'scores': {'Grondwerken': 0.14, 'Sanitair': 0.78}}
-                },
-                'items': {
-                    'Grondverzet': {
-                        'Grondwerken': {
-                            'Fundering graven': {'best_match': 'Graven fundering', 'scores': {'Graven fundering': 0.88, 'Afvoer aarde': 0.41}},
-                            'Zand afvoeren': {'best_match': 'Afvoer aarde', 'scores': {'Graven fundering': 0.35, 'Afvoer aarde': 0.85}}
-                        },
-                        'Sanitair': {
-                            'Fundering graven': {'best_match': 'Installatie toilet', 'scores': {'Installatie toilet': 0.10}},
-                            'Zand afvoeren': {'best_match': 'Installatie toilet', 'scores': {'Installatie toilet': 0.12}}
-                        }
-                    },
-                    'Badkamer': {
-                        'Grondwerken': {
-                            'Toilet montage': {'best_match': 'Graven fundering', 'scores': {'Graven fundering': 0.05, 'Afvoer aarde': 0.02}}
-                        },
-                        'Sanitair': {
-                            'Toilet montage': {'best_match': 'Installatie toilet', 'scores': {'Installatie toilet': 0.81}}
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    # 3. Launch UI
-    window = MappingTab(master_data, target_contracts)
-    window.resize(900, 500)  # Made it wider to accommodate 3 columns
-    window.setWindowTitle("Meerdere Contracten Vergelijken")
-    window.show()
-
-    # Print Button
-    btn_print = QPushButton("Print Final Mapping (Console)")
-    btn_print.clicked.connect(lambda: print(window.extract_final_mapping()))
-    window.layout().addWidget(btn_print)
-
-    sys.exit(app.exec())
