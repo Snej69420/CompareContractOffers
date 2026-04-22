@@ -307,9 +307,10 @@ if __name__ == "__main__":
     try:
         contract_a = loader.load_excel(base_dir / "JV-Offerte_Template_DeCock.xlsx")
         contract_b = loader.load_excel(base_dir / "JV-Offerte_Template_Michielse.xlsx")
+        contrac_c = loader.load_excel(base_dir / "JV-Offerte_Template_VNT.xlsx")
 
         matcher = ScoringEngine(threshold=0.4)
-        mapping_results = matcher.match(contract_a, contract_b)
+        mapping_results = matcher.match(contract_a, contract_c)
 
         # --- 1. Identify Unmatched Items ---
         # Extract names of matched items
