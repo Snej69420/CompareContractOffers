@@ -303,14 +303,15 @@ if __name__ == "__main__":
 
     base_dir = Path(r"C:\Users\jensv\Documents\Steen Vastgoed\Offertes Vergelijken\Pre-Made Templates")
     loader = ContractLoader()
-
+    decock = "JV-Offerte_Template_DeCock.xlsx"
+    michielse = "JV-Offerte_Template_Michielse.xlsx"
+    vnt = "JV-Offerte_Template_VNT.xlsx"
     try:
-        contract_a = loader.load_excel(base_dir / "JV-Offerte_Template_DeCock.xlsx")
-        contract_b = loader.load_excel(base_dir / "JV-Offerte_Template_Michielse.xlsx")
-        contract_c = loader.load_excel(base_dir / "JV-Offerte_Template_VNT.xlsx")
+        contract_a = loader.load_excel(base_dir / decock)
+        contract_b = loader.load_excel(base_dir / vnt)
 
         matcher = ScoringEngine(threshold=0.4)
-        mapping_results = matcher.match(contract_a, contract_c)
+        mapping_results = matcher.match(contract_a, contract_b)
 
         # --- 1. Identify Unmatched Items ---
         # Extract names of matched items
