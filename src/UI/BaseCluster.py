@@ -1,8 +1,11 @@
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame
+from PySide6.QtCore import Signal, Qt
 from src.UI.DraggableItemList import DraggableItemList
 
 class BaseClusterWidget(QFrame):
     """Base class providing the layout and height logic for both Clusters and the Parking Lot."""
+    requestNeighborMove = Signal(object, object, str)
+    requestGlobalNavigation = Signal(object, str, str)
 
     def __init__(self, title_text: str):
         super().__init__()
@@ -31,6 +34,73 @@ class BaseClusterWidget(QFrame):
         lists_layout.addWidget(self.list_a)
         lists_layout.addWidget(self.list_b)
         self.layout.addWidget(self.lists_widget)
+
+        self.list_a.moveToNeighbor.connect(self._emit_neighbor_move)
+        self.list_b.moveToNeighbor.connect(self._emit_neighbor_move)
+
+        self.list_a.navigateBoundary.connect(self.handle_boundary_navigation)
+        self.list_b.navigateBoundary.connect(self.handle_boundary_navigation)
+
+    def _emit_neighbor_move(self, match_item, direction):
+        """Passes the request up, identifying self as the source."""
+        self.requestNeighborMove.emit(self, match_item, direction)
+
+    def handle_boundary_navigation(self, side, direction):
+        if direction == "left" and side == "B":
+            # Jump from B to A
+            self.list_a.setFocus()
+            if self.list_a.count() > 0:
+                # Try to stay on the same row index, or the bottom if it's shorter
+                row = min(self.list_b.currentRow(), self.list_a.count() - 1)
+                self.list_a.setCurrentRow(max(0, row))
+
+        elif direction == "right" and side == "A":
+            # Jump from A to B
+            self.list_b.setFocus()
+            if self.list_b.count() > 0:
+                row = min(self.list_a.currentRow(), self.list_b.count() - 1)
+                self.list_b.setCurrentRow(max(0, row))
+
+        else:
+            # Up or Down requires leaving the cluster, tell MainWindow!
+            self.requestGlobalNavigation.emit(self, side, direction)
+
+    def remove_item_silently(self, match_item):
+        """Removes an item without emitting ejection signals."""
+        items_a = self.list_a.get_items()
+        items_b = self.list_b.get_items()
+
+        if match_item.side == 'A':
+            items_a = [i for i in items_a if i is not match_item]
+        else:
+            items_b = [i for i in items_b if i is not match_item]
+
+        self.list_a.rebuild_ui(items_a)
+        self.list_b.rebuild_ui(items_b)
+        self.on_items_changed()  # Triggers recalculate/resort
+
+    def inject_item(self, match_item):
+        """Safely inserts an item coming from a neighbor."""
+        items_a = self.list_a.get_items()
+        items_b = self.list_b.get_items()
+
+        if match_item.side == 'A':
+            items_a.append(match_item)
+        else:
+            items_b.append(match_item)
+
+        self.list_a.rebuild_ui(items_a)
+        self.list_b.rebuild_ui(items_b)
+        self.on_items_changed()
+
+    def focus_on_item(self, match_item):
+        """Finds the newly injected item and gives it keyboard focus."""
+        target_list = self.list_a if match_item.side == 'A' else self.list_b
+        for i in range(target_list.count()):
+            if target_list.item(i).data(Qt.ItemDataRole.UserRole) is match_item:
+                target_list.setCurrentRow(i)
+                target_list.setFocus()
+                break
 
     def on_items_changed(self):
         """To be overridden by child classes to handle re-calculations."""

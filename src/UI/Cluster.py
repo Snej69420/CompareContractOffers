@@ -62,12 +62,21 @@ class Cluster(BaseClusterWidget):
         if not items_a and not items_b:
             self.clusterRemoved.emit(self, [], [])
         else:
-            reply = QMessageBox.question(
-                self, 'Cluster Verwijderen',
-                'Dit cluster bevat nog items. Weet je zeker dat je dit wilt verwijderen?\nDe items gaan naar de Parking Lot.',
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No
-            )
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle('Cluster Verwijderen')
+            msg_box.setText(
+                'Deze cluster is niet leeg, weet je zeker dat je deze wilt verwijderen?'
+                '\nDe items zullen toegevoegd worden aan de lijst met ongekoppelde items')
+            msg_box.setIcon(QMessageBox.Icon.Question)
+
+            msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            msg_box.setDefaultButton(QMessageBox.StandardButton.No)
+
+            msg_box.setButtonText(QMessageBox.StandardButton.Yes, "Ja")
+            msg_box.setButtonText(QMessageBox.StandardButton.No, "Nee")
+
+            reply = msg_box.exec()
+
             if reply == QMessageBox.StandardButton.Yes:
                 self.clusterRemoved.emit(self, items_a, items_b)
 
@@ -184,3 +193,8 @@ class Cluster(BaseClusterWidget):
             self.approve_btn.setText("Approve ✓")
             self.setStyleSheet(
                 "ClusterWidget { background-color: #f9f9f9; border: 1px solid #ddd; border-radius: 5px; margin: 5px; }")
+
+    def mouseDoubleClickEvent(self, event):
+        if self.is_approved:
+            self.toggle_approve()
+        super().mouseDoubleClickEvent(event)

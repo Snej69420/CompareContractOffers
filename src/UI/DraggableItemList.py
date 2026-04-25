@@ -7,6 +7,8 @@ from src.UI.ProductItem import ProductItem
 class DraggableItemList(QListWidget):
     itemDropped = Signal()
     itemEjected = Signal(object)
+    moveToNeighbor = Signal(object, str)
+    navigateBoundary = Signal(str, str)  # side ('A' or 'B'), direction ('up', 'down', 'left', 'right')
 
     def __init__(self, side: str):
         super().__init__()
@@ -38,6 +40,52 @@ class DraggableItemList(QListWidget):
                 QTimer.singleShot(0, source.itemDropped.emit)
         else:
             event.ignore()
+
+    def keyPressEvent(self, event):
+        selected_items = self.selectedItems()
+        current_row = self.currentRow()
+
+        # Handle Ctrl + Up/Down (Item moving)
+        if selected_items and (event.modifiers() & Qt.KeyboardModifier.ControlModifier):
+            current_item = selected_items[0].data(Qt.ItemDataRole.UserRole)
+            if event.key() == Qt.Key.Key_Up:
+                self.moveToNeighbor.emit(current_item, "up")
+                return
+            elif event.key() == Qt.Key.Key_Down:
+                self.moveToNeighbor.emit(current_item, "down")
+                return
+
+        # Handle Delete/Backspace
+        if selected_items and event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
+            current_item = selected_items[0].data(Qt.ItemDataRole.UserRole)
+            self.itemEjected.emit(current_item)
+            return
+
+        # --- NEW: Handle Boundary Navigation (Moving Focus) ---
+        # <= 0 handles both the top row (0) and empty lists (-1)
+        if event.key() == Qt.Key.Key_Up and current_row <= 0:
+            self.navigateBoundary.emit(self.side, "up")
+            return
+
+        elif event.key() == Qt.Key.Key_Down and (current_row == self.count() - 1 or current_row == -1):
+            self.navigateBoundary.emit(self.side, "down")
+            return
+
+        elif event.key() == Qt.Key.Key_Left and self.side == 'B':
+            self.navigateBoundary.emit(self.side, "left")
+            return
+
+        elif event.key() == Qt.Key.Key_Right and self.side == 'A':
+            self.navigateBoundary.emit(self.side, "right")
+            return
+
+        # Default behavior (Normal Up/Down selection)
+        super().keyPressEvent(event)
+
+    def focusOutEvent(self, event):
+        """Clears the visual selection when the user navigates away from this list."""
+        self.clearSelection()
+        super().focusOutEvent(event)
 
     def get_items(self) -> list[MatchItem]:
         return [self.item(i).data(Qt.ItemDataRole.UserRole) for i in range(self.count())]
