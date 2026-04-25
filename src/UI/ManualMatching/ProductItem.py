@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QPushButton, QLabel
 from PySide6.QtCore import Qt
 
-from src.UI.MatchItem import MatchItem
+from src.UI.ManualMatching.MatchItem import MatchItem
 
 class ProductItem(QWidget):
     def __init__(self, match_item: MatchItem, eject_callback=None):  # Added callback

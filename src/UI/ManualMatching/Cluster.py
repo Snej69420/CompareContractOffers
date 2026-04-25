@@ -1,8 +1,8 @@
 from PySide6.QtWidgets import QPushButton, QMessageBox
 from PySide6.QtCore import Signal
 
-from src.UI.BaseCluster import BaseClusterWidget
-from src.UI.MatchItem import MatchItem
+from src.UI.ManualMatching.BaseCluster import BaseClusterWidget
+from src.UI.ManualMatching.MatchItem import MatchItem
 
 class Cluster(BaseClusterWidget):
     itemToParkingLot = Signal(object)

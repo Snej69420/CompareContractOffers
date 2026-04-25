@@ -1,5 +1,5 @@
-from src.UI.BaseCluster import BaseClusterWidget
-from src.UI.MatchItem import MatchItem
+from src.UI.ManualMatching.BaseCluster import BaseClusterWidget
+from src.UI.ManualMatching.MatchItem import MatchItem
 
 class Unmatched(BaseClusterWidget):
     def __init__(self, unmatched_a: list, unmatched_b: list):

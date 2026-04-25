@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame
 from PySide6.QtCore import Signal, Qt
-from src.UI.DraggableItemList import DraggableItemList
+from src.UI.ManualMatching.DraggableItemList import DraggableItemList
 
 class BaseClusterWidget(QFrame):
     """Base class providing the layout and height logic for both Clusters and the Parking Lot."""

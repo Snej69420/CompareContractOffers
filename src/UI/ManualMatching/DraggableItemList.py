@@ -1,8 +1,8 @@
 from PySide6.QtWidgets import QListWidget, QListWidgetItem
 from PySide6.QtCore import Qt, Signal
 
-from src.UI.MatchItem import MatchItem
-from src.UI.ProductItem import ProductItem
+from src.UI.ManualMatching.MatchItem import MatchItem
+from src.UI.ManualMatching.ProductItem import ProductItem
 
 class DraggableItemList(QListWidget):
     itemDropped = Signal()
