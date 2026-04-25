@@ -1,19 +1,22 @@
 import sys
 import threading
+from pathlib import Path
+
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QLabel, QScrollArea
+    QPushButton, QLabel, QScrollArea, QTabWidget, QFileDialog, QMessageBox,
 )
 
 from PySide6.QtCore import Qt, Signal, QObject, QTimer, QPoint
 from PySide6.QtGui import QColor, QPalette
 
-from src.Contracts.loader import ContractLoader
-from src.Contracts.scoring import ScoringEngine
+from src.Compare.loader import ContractLoader
+from src.Compare.scoring import ScoringEngine
 
-from src.UI.MatchItem import MatchItem
-from src.UI.Cluster import Cluster
-from src.UI.Unmatched import Unmatched
+from src.UI.ManualMatching.MatchItem import MatchItem
+from src.UI.ManualMatching.Cluster import Cluster
+from src.UI.ManualMatching.Unmatched import Unmatched
+from src.UI.DataModel.DocumentTab import DocumentTabWidget
 
 class WorkerSignals(QObject):
     finished = Signal(object, object, object, object)
@@ -44,17 +47,23 @@ class AIWorker(threading.Thread):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Contract AI Comparer")
+        self.setWindowTitle("AI Offertevergelijker")
         self.resize(1000, 800)
 
+        # --- 1. MAIN WINDOW SETUP ---
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         self.main_layout = QVBoxLayout(central_widget)
 
+        # --- 2. TOP BAR CONTROLS ---
         top_bar = QHBoxLayout()
-        self.load_btn = QPushButton("Offertes inladen (Mock)")
+
+        self.load_btn = QPushButton("Offertes inladen 📂")
+        self.load_btn.clicked.connect(self.load_documents)
+
         self.run_btn = QPushButton("Start analyse")
         self.run_btn.setStyleSheet("background-color: #007bff; color: white; font-weight: bold; padding: 8px;")
+        self.run_btn.clicked.connect(self.run_comparison)
 
         self.status_label = QLabel("Klaar voor gebruik.")
         self.status_label.setStyleSheet("color: black;")
@@ -63,7 +72,16 @@ class MainWindow(QMainWindow):
         top_bar.addWidget(self.run_btn)
         top_bar.addWidget(self.status_label)
         top_bar.addStretch()
+
         self.main_layout.addLayout(top_bar)
+
+        # --- 3. MASTER TAB SYSTEM ---
+        self.tabs = QTabWidget()
+        self.main_layout.addWidget(self.tabs)
+
+        # --- 4. AI COMPARISON TAB (Your existing UI) ---
+        self.comparison_tab = QWidget()
+        self.comparison_layout = QVBoxLayout(self.comparison_tab)
 
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
@@ -72,25 +90,74 @@ class MainWindow(QMainWindow):
         self.cluster_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.scroll_area.setWidget(self.cluster_container)
 
-        self.main_layout.addWidget(self.scroll_area)
-        self.run_btn.clicked.connect(self.run_comparison)
+        # CRITICAL FIX: Add scroll area to the comparison tab's layout, NOT the main layout
+        self.comparison_layout.addWidget(self.scroll_area)
 
+        # Finally, register this tab into the Tab System
+        self.tabs.addTab(self.comparison_tab, "AI Vergelijking")
+
+        # --- 5. STATE VARIABLES ---
+        self.path_a = None
+        self.path_b = None
         self.global_score_lookup = {}
         self.cluster_count = 0
 
+    def load_documents(self):
+        # 1. Ask for Document A
+        path_a, _ = QFileDialog.getOpenFileName(self, "Selecteer Offerte A", "", "Excel Files (*.xlsx *.xls)")
+        if not path_a: return  # User cancelled
+
+        # 2. Ask for Document B
+        path_b, _ = QFileDialog.getOpenFileName(self, "Selecteer Offerte B", "", "Excel Files (*.xlsx *.xls)")
+        if not path_b: return
+
+        self.status_label.setText("Bestanden inladen...")
+        QApplication.processEvents()  # Force UI to update
+
+        try:
+            self.path_a = Path(path_a)
+            self.path_b = Path(path_b)
+
+            loader = ContractLoader()
+            df_a = loader.load_excel(self.path_a)
+            df_b = loader.load_excel(self.path_b)
+
+            # 3. Manage Tabs: Remove old document tabs if they exist
+            while self.tabs.count() > 1:
+                self.tabs.removeTab(0)
+
+            # 4. Create and insert the new Document Tabs
+            tab_a = DocumentTabWidget(df_a, self.path_a.name)
+            tab_b = DocumentTabWidget(df_b, self.path_b.name)
+
+            self.tabs.insertTab(0, tab_a, "📄 Offerte A")
+            self.tabs.insertTab(1, tab_b, "📄 Offerte B")
+
+            # Switch to first tab so user sees the loaded data
+            self.tabs.setCurrentIndex(0)
+            self.status_label.setText(f"Klaar voor gebruik. ({len(df_a)} en {len(df_b)} items)")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Laadfout", f"Fout bij inladen van bestanden:\n{str(e)}")
+            self.status_label.setText("Fout bij inladen.")
+
     def run_comparison(self):
+        if not self.path_a or not self.path_b:
+            QMessageBox.warning(self, "Geen bestanden", "Laad eerst twee offertes in.")
+            return
+
         self.status_label.setText("Bezig met analyseren... Even geduld.")
         self.run_btn.setEnabled(False)
 
+        # Clear existing clusters
         for i in reversed(range(self.cluster_layout.count())):
             self.cluster_layout.itemAt(i).widget().setParent(None)
 
-        from pathlib import Path
-        base_dir = Path("./data")
-        path_a = base_dir / "JV-Offerte_Template_DeCock.xlsx"
-        path_b = base_dir / "JV-Offerte_Template_VNT.xlsx"
+        # Automatically switch to the AI Compare Tab
+        self.tabs.setCurrentWidget(self.comparison_tab)
 
-        self.worker = AIWorker(path_a, path_b)
+        # Pass the dynamic paths to the worker
+        self.worker = AIWorker(self.path_a, self.path_b)
         self.worker.signals.finished.connect(self.on_ai_finished)
         self.worker.signals.error.connect(self.on_ai_error)
         self.worker.start()
