@@ -7,8 +7,8 @@ import numpy as np
 from rank_bm25 import BM25Okapi
 from sentence_transformers import SentenceTransformer, util
 
-from src.Contracts.loader import ContractLoader
-from src.Contracts.textprocessing import TextNormalizer
+from src.Compare.loader import ContractLoader
+from src.Compare.textprocessing import TextNormalizer
 
 seed = 42
 os.environ['PYTHONHASHSEED'] = str(seed)
@@ -31,7 +31,7 @@ class ScoringEngine:
         self.BM25_WEIGHT = 0.50
         self.SEMANTIC_WEIGHT = 0.50
 
-    def match(self, df_a: pd.DataFrame, df_b: pd.DataFrame) -> list[dict]:
+    def match(self, df_a: pd.DataFrame, df_b: pd.DataFrame)-> tuple[list[dict], dict, list[dict], list[dict]]:
         docs_a_raw = (df_a['Categorie'].astype(str) + " " + df_a['Naam'].astype(str)).tolist()
         docs_b_raw = (df_b['Categorie'].astype(str) + " " + df_b['Naam'].astype(str)).tolist()
 
@@ -63,7 +63,8 @@ class ScoringEngine:
                     scoring_matrix.append({"id_a": i, "id_b": j, "final_score": final_score})
 
         scoring_matrix.sort(key=lambda x: (x["final_score"], x["id_a"], x["id_b"]), reverse=True)
-        return self._build_clusters(scoring_matrix, df_a, df_b), full_score_lookup
+        clusters, unmatched_a, unmatched_b = self._build_clusters(scoring_matrix, df_a, df_b)
+        return clusters, full_score_lookup, unmatched_a, unmatched_b
 
     def _apply_guardrails(self, base_score: float, row_a: pd.Series, row_b: pd.Series) -> float:
         t_unit = TextNormalizer.normalize_unit(row_a.get('Eenheid', ''))
@@ -92,8 +93,14 @@ class ScoringEngine:
 
         return max(0.0, min(base_score + penalty + bonus, 1.0))
 
+    def _build_clusters(self, sorted_matrix: list[dict], df_a: pd.DataFrame, df_b: pd.DataFrame) -> tuple[
+        list[dict], list[dict], list[dict]]:
+        """Main orchestrator for graph generation and data formatting."""
+        clusters = self._generate_graph_clusters(sorted_matrix, df_a, df_b)
+        return self._format_results(clusters, df_a, df_b)
 
-    def _build_clusters(self, sorted_matrix: list[dict], df_a: pd.DataFrame, df_b: pd.DataFrame) -> list[dict]:
+    def _generate_graph_clusters(self, sorted_matrix: list[dict], df_a: pd.DataFrame, df_b: pd.DataFrame) -> dict:
+        """Handles the core algorithmic logic of building matched sets based on fulfillment."""
         node_to_cluster = {}
         clusters = {}
         cluster_counter = 0
@@ -103,8 +110,7 @@ class ScoringEngine:
         best_scores_a = {}
 
         for match in sorted_matrix:
-            i, j = match["id_a"], match["id_b"]
-            score = match["final_score"]
+            i, j, score = match["id_a"], match["id_b"], match["final_score"]
             qty_a = float(df_a.iloc[i].get('Aantal', 0.0))
             qty_b = float(df_b.iloc[j].get('Aantal', 0.0))
 
@@ -115,17 +121,9 @@ class ScoringEngine:
             b_is_full = (fulfilled_b[j] >= (qty_b - 0.01)) if qty_b > 0 else (fulfilled_b[j] >= 1.0)
 
             # --- COMPANION ITEM EXCEPTION ---
-            # If items share the exact same quantity, they might be parallel operations
-            # (e.g., placing the roof edge AND sealing the roof edge).
-            # We allow an empty item to pair with a full item so they cluster together.
             is_companion = False
             if qty_a > 0 and abs(qty_a - qty_b) < 0.01:
-                # If the quantity is a highly specific decimal (e.g., 104.93), it's a signature.
-                # We can trust the number more than the semantics.
                 is_signature_qty = (qty_a > 10.0) and (qty_a % 1 != 0)
-
-                # Lower the required semantic ratio to 50% for signatures,
-                # keep it strict (90%/80%) for generic integers.
                 score_ratio_required = 0.50 if is_signature_qty else (0.90 if qty_a <= 2.5 else 0.80)
 
                 if i in best_scores_a and score >= (best_scores_a[i] * score_ratio_required):
@@ -134,12 +132,12 @@ class ScoringEngine:
                     elif b_is_full and not a_is_full:
                         is_companion = True
 
+            # --- FULFILLMENT CHECK ---
             if (not a_is_full and not b_is_full) or is_companion:
                 if i not in best_scores_a:
                     best_scores_a[i] = score
 
-                v_limit = 0.50
-                if score < (best_scores_a[i] * v_limit):
+                if score < (best_scores_a[i] * 0.50):
                     continue
 
                 # Add to fulfillment
@@ -155,40 +153,54 @@ class ScoringEngine:
                     else:
                         fulfilled_b[j] += qty_a
 
-                # --- NEW GRAPH LOGIC (NO SNOWBALLING) ---
-                node_a = f"A_{i}"
-                node_b = f"B_{j}"
-
-                cluster_a = node_to_cluster.get(node_a)
-                cluster_b = node_to_cluster.get(node_b)
+                # --- CLUSTER ASSIGNMENT ---
+                node_a, node_b = f"A_{i}", f"B_{j}"
+                cluster_a, cluster_b = node_to_cluster.get(node_a), node_to_cluster.get(node_b)
 
                 if cluster_a is None and cluster_b is None:
-                    # Create new independent cluster
                     clusters[cluster_counter] = {'a_nodes': {i}, 'b_nodes': {j}, 'scores': [score]}
                     node_to_cluster[node_a] = cluster_counter
                     node_to_cluster[node_b] = cluster_counter
                     cluster_counter += 1
                 elif cluster_a is not None and cluster_b is None:
-                    # Add B directly to A's group
                     clusters[cluster_a]['b_nodes'].add(j)
                     clusters[cluster_a]['scores'].append(score)
                     node_to_cluster[node_b] = cluster_a
                 elif cluster_b is not None and cluster_a is None:
-                    # Add A directly to B's group
                     clusters[cluster_b]['a_nodes'].add(i)
                     clusters[cluster_b]['scores'].append(score)
                     node_to_cluster[node_a] = cluster_b
-                else:
-                    # BOTH items already belong to different clusters.
-                    # Instead of merging the clusters (which causes the mess), we safely ignore the link.
-                    pass
 
-        return [{
-            "contract_a_items": [{"id": a, **df_a.iloc[a].to_dict()} for a in c['a_nodes']],
-            "contract_b_items": [{"id": b, **df_b.iloc[b].to_dict()} for b in c['b_nodes']],
-            "cluster_score": round(sum(c['scores']) / len(c['scores']), 2)
-        } for c in clusters.values()]
+        return clusters
 
+    def _format_results(self, clusters: dict, df_a: pd.DataFrame, df_b: pd.DataFrame) -> tuple[
+        list[dict], list[dict], list[dict]]:
+        """Handles transforming the clusters and raw dataframes into the structured dictionaries required by the UI."""
+        matched_a = {a for c in clusters.values() for a in c['a_nodes']}
+        matched_b = {b for c in clusters.values() for b in c['b_nodes']}
+
+        formatted_clusters = []
+        for c in clusters.values():
+            # FIXED: Ensuring "Norm_Eenheid" is universally used for both matched items
+            formatted_clusters.append({
+                "contract_a_items": [
+                    {"id": a, "unit": TextNormalizer.normalize_unit(df_a.iloc[a].get('Eenheid', '')),
+                     **df_a.iloc[a].to_dict()} for a in c['a_nodes']],
+                "contract_b_items": [
+                    {"id": b, "unit": TextNormalizer.normalize_unit(df_b.iloc[b].get('Eenheid', '')),
+                     **df_b.iloc[b].to_dict()} for b in c['b_nodes']],
+                "cluster_score": round(sum(c['scores']) / len(c['scores']), 2)
+            })
+
+        unmatched_a = [{"id": i, "unit": TextNormalizer.normalize_unit(df_a.iloc[i].get('Eenheid', '')),
+                        **df_a.iloc[i].to_dict()}
+                       for i in range(len(df_a)) if i not in matched_a]
+
+        unmatched_b = [{"id": j, "unit": TextNormalizer.normalize_unit(df_b.iloc[j].get('Eenheid', '')),
+                        **df_b.iloc[j].to_dict()}
+                       for j in range(len(df_b)) if j not in matched_b]
+
+        return formatted_clusters, unmatched_a, unmatched_b
 
 if __name__ == "__main__":
     from pathlib import Path

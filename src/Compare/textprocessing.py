@@ -8,8 +8,8 @@ class TextNormalizer:
     """Handles deep NLP cleaning, stemming, and unit standardization."""
 
     UNIT_MAP = {
-        'm2': 'm2', 'vkm': 'm2', 'sqm': 'm2', 'm²': 'm2',
-        'm3': 'm3', 'kub': 'm3', 'kuub': 'm3', 'm³': 'm3',
+        'm2': 'm²', 'vkm': 'm²', 'sqm': 'm²', 'm²': 'm²',
+        'm3': 'm³', 'kub': 'm³', 'kuub': 'm³', 'm³': 'm³',
         'lm': 'm', 'lopende meter': 'm', 'm1': 'm',
         'st': 'st', 'stuks': 'st', 'pce': 'st', 'pc': 'st',
         'ff': 'ff', 'sog': 'ff', "s.o.g.": 'ff',
