@@ -23,7 +23,9 @@ class Product(QListWidgetItem):
         if getattr(self, 'is_manual', False):
             prefix = "🧑‍🔧 "
             self.setToolTip(
-                f"Originele Categorie: {self.orig_cat}\nVolledige naam:\n{self.orig_name}\n\n🧑‍🔧 Handmatig geplaatst."
+                f"Originele Categorie: {self.orig_cat}\n"
+                f"Volledige naam: {self.orig_name}\n\n"
+                f"🧑‍🔧 Handmatig geplaatst door gebruiker."
             )
         elif self.is_extra:
             prefix = "🔹 "
@@ -35,7 +37,11 @@ class Product(QListWidgetItem):
             qty_s = self.score_data.get('qty', 0.0)
             var_p = self.score_data.get('variance', 0.0)
 
-            icon = "⭐" if total >= self.threshold else "⚠️"
+            # Confidence levels
+            if total >= 0.85: icon = "🟢" # High confidence
+            elif total >= self.threshold: icon = "🟡" # Decent match
+            else: icon = "🔴" # Weak match / Warning
+
             prefix = f"{icon} "
             suffix = f" ({total:.2f})"
 
@@ -45,9 +51,9 @@ class Product(QListWidgetItem):
                 f"━━━━━━━━━━━━━━━━━━━━━━\n"
                 f"TOTAAL SCORE: {total:.2f}\n"
                 f"  • Tekst AI Score:  {text_s:.2f}\n"
-                f"  • Eenheid Penalty: {unit_p:.2f}\n"
+                f"  • Eenheid Straf:   {unit_p:.2f}\n"
                 f"  • Aantal Bonus:    +{qty_s:.2f}\n"
-                f"  • Variantie Penalty: {var_p:.2f}"
+                f"  • Variantie Straf: {var_p:.2f}"
             )
         else:
             self.setToolTip(f"Originele Categorie: {self.orig_cat}\n{self.orig_name}")
@@ -61,7 +67,7 @@ class Product(QListWidgetItem):
             self.setText(f"{prefix}{self.orig_name}{suffix}")
         else:
             fm = list_widget.fontMetrics()
-            available_width = list_widget.viewport().width() - 35
+            available_width = list_widget.viewport().width() - 40
             fixed_width = fm.horizontalAdvance(prefix + suffix)
             name_width = available_width - fixed_width
 

@@ -5,6 +5,7 @@ from PySide6.QtWidgets import (
 from src.UI.Product import Product
 from src.UI.Matching import MatchBucket
 
+
 class CompareTab(QWidget):
     def __init__(self, master_dict, target_contracts):
         super().__init__()
@@ -36,11 +37,11 @@ class CompareTab(QWidget):
 
         controls_layout = QHBoxLayout()
         info = QLabel(
-            "<b>Sorteer items in 'Groepen' om ze naast elkaar te plaatsen in Excel.</b><br>"
-            "Sleep meerdere items naar dezelfde kolom als een aannemer iets heeft opgesplitst (1-op-N relaties)."
+            "<b>Sorteer items in 'Groepen' om ze naast elkaar te plaatsen.</b><br>"
+            "Sleep items handmatig om de AI te corrigeren. De scores worden live bijgewerkt."
         )
         info.setFrameShape(QFrame.StyledPanel)
-        info.setContentsMargins(10, 10, 10, 10) # Replaced deprecated setMargin
+        info.setContentsMargins(10, 10, 10, 10)
 
         thresh_layout = QVBoxLayout()
         thresh_layout.addWidget(QLabel("<b>AI Drempelwaarde:</b>"))
@@ -69,14 +70,14 @@ class CompareTab(QWidget):
         for c_name in self.all_contract_names:
             lbl = QLabel(c_name)
             lbl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-            lbl.setStyleSheet("font-weight: bold; font-size: 14px;")
+            lbl.setStyleSheet("font-weight: bold; font-size: 13px; color: #555;")
             header_layout.addWidget(lbl, stretch=1)
 
         self.scroll_layout.addLayout(header_layout)
 
         separator = QFrame()
         separator.setFrameShape(QFrame.HLine)
-        separator.setStyleSheet("color: rgba(128, 128, 128, 0.5);")
+        separator.setStyleSheet("color: rgba(128, 128, 128, 0.2);")
         self.scroll_layout.addWidget(separator)
 
         self.bucket_container = QVBoxLayout()
@@ -89,11 +90,8 @@ class CompareTab(QWidget):
 
     def reapply_threshold(self, value):
         self.current_threshold = value
-        for bucket in self.buckets:
-            bucket.setParent(None)
-            bucket.deleteLater()
-        self.buckets.clear()
-        self.populate_ai_data()
+        # Refresh all products to show warning icons if they fall below new threshold
+        self.refresh_all_scores()
 
     def add_bucket(self):
         bucket = MatchBucket(self.all_contract_names)
@@ -105,7 +103,7 @@ class CompareTab(QWidget):
 
     def cleanup_empty_buckets(self):
         empty_buckets = [b for b in self.buckets if b.is_completely_empty()]
-
+        # Keep at least one empty bucket at the bottom for new drops
         while len(empty_buckets) > 1:
             b_to_remove = empty_buckets.pop(0)
             self.buckets.remove(b_to_remove)
@@ -122,78 +120,84 @@ class CompareTab(QWidget):
                 bucket = self.add_bucket()
                 widget = Product(c1_cat, c1_item, threshold=self.current_threshold)
                 bucket.lists["Contract 1"].addItem(widget)
-                c1_item_map[c1_item] = bucket
+                if c1_item not in c1_item_map:
+                    c1_item_map[c1_item] = []
+                c1_item_map[c1_item].append(bucket)
 
         unmapped_items = {c: [] for c in self.target_contracts.keys()}
 
         for contract_name, contract_info in self.target_contracts.items():
             ai_mapping = contract_info['ai']['items']
-            target_data = contract_info['data']
+            best_matches = {}
 
-            for t_cat, t_items in target_data.items():
-                for t_item in t_items:
-                    best_global_score = -1
-                    best_global_m_name = None
-                    best_score_data = None
+            for t_cat, m_cats in ai_mapping.items():
+                for m_cat, t_items in m_cats.items():
+                    for t_unique_key, match_data in t_items.items():
+                        t_item_raw = match_data.get('target_raw_name', t_unique_key.split(' [Row')[0])
 
-                    for m_cat in ai_mapping.get(t_cat, {}).keys():
-                        m_cat_data = ai_mapping[t_cat][m_cat].get(t_item, {})
-                        scores_dict = m_cat_data.get('scores', {})
+                        if t_unique_key not in best_matches:
+                            best_matches[t_unique_key] = {
+                                't_cat': t_cat, 't_item_raw': t_item_raw,
+                                'best_score': -1, 'best_master_raw': None, 'score_data': None
+                            }
 
-                        for m_item, score_data in scores_dict.items():
+                        scores_dict = match_data.get('scores', {})
+                        for m_unique, score_data in scores_dict.items():
                             total = score_data.get('total', 0.0) if isinstance(score_data, dict) else float(score_data)
-                            if total > best_global_score:
-                                best_global_score = total
-                                best_global_m_name = m_item
-                                best_score_data = score_data
+                            if total > best_matches[t_unique_key]['best_score']:
+                                best_matches[t_unique_key]['best_score'] = total
+                                best_matches[t_unique_key]['best_master_raw'] = score_data.get('master_raw_name',
+                                                                                               m_unique.split(' [Row')[
+                                                                                                   0])
+                                best_matches[t_unique_key]['score_data'] = score_data
 
-                    placed = False
-                    if best_global_score >= self.current_threshold and best_global_m_name in c1_item_map:
-                        target_bucket = c1_item_map[best_global_m_name]
-                        widget = Product(t_cat, t_item, score_data=best_score_data,
-                                                threshold=self.current_threshold)
-                        target_bucket.lists[contract_name].addItem(widget)
-                        widget.update_display()
-                        placed = True
+            for t_unique_key, b_match in best_matches.items():
+                placed = False
+                if b_match['best_score'] >= self.current_threshold and b_match['best_master_raw'] in c1_item_map:
+                    target_bucket = c1_item_map[b_match['best_master_raw']][0]
+                    widget = Product(b_match['t_cat'], b_match['t_item_raw'], score_data=b_match['score_data'],
+                                     threshold=self.current_threshold)
+                    target_bucket.lists[contract_name].addItem(widget)
+                    placed = True
 
-                    if not placed:
-                        unmapped_items[contract_name].append((t_cat, t_item))
+                if not placed:
+                    unmapped_items[contract_name].append((b_match['t_cat'], b_match['t_item_raw']))
 
+        # Handle leftovers via shared groups or new buckets
         for contract_name, item_tuples in unmapped_items.items():
             for t_cat, t_item in item_tuples:
                 group_id = self.global_item_groups.get(t_item)
                 placed = False
-
                 for bucket in self.buckets:
                     if bucket.lists["Contract 1"].count() > 0: continue
 
-                    row_belongs_to_group = False
-                    for other_contract in self.target_contracts.keys():
-                        lst = bucket.lists[other_contract]
+                    match_found = False
+                    for other_c in self.target_contracts.keys():
+                        lst = bucket.lists[other_c]
                         for idx in range(lst.count()):
-                            existing_val = lst.item(idx).orig_name
-                            if self.global_item_groups.get(existing_val) == group_id:
-                                row_belongs_to_group = True
+                            if self.global_item_groups.get(lst.item(idx).orig_name) == group_id:
+                                match_found = True;
                                 break
+                        if match_found: break
 
-                    if row_belongs_to_group:
+                    if match_found:
                         widget = Product(t_cat, t_item, is_extra=True, threshold=self.current_threshold)
                         bucket.lists[contract_name].addItem(widget)
-                        widget.update_display()
-                        placed = True
+                        placed = True;
                         break
 
                 if not placed:
                     new_bucket = self.add_bucket()
                     widget = Product(t_cat, t_item, is_extra=True, threshold=self.current_threshold)
                     new_bucket.lists[contract_name].addItem(widget)
-                    widget.update_display()
 
         self.cleanup_empty_buckets()
 
     def refresh_all_scores(self):
+        """Recalculates scores based on current bucket positions."""
         for bucket in self.buckets:
             anchor_item = None
+            # Find the master item in this bucket
             if bucket.lists["Contract 1"].count() > 0:
                 anchor_item = bucket.lists["Contract 1"].item(0).orig_name
 
@@ -206,33 +210,34 @@ class CompareTab(QWidget):
                         item_widget.score_data = None
                         item_widget.is_manual = False
                         item_widget.is_extra = False
-                        item_widget.threshold = self.current_threshold
-                        item_widget.update_display()
-                        continue
-
-                    t_cat = item_widget.orig_cat
-                    t_item = item_widget.orig_name
-
-                    if anchor_item:
-                        ai_mapping = contract_info['ai']['items']
-                        score_data = None
-
-                        for m_cat in ai_mapping.get(t_cat, {}).keys():
-                            lookup = ai_mapping.get(t_cat, {}).get(m_cat, {}).get(t_item, {}).get('scores', {}).get(
-                                anchor_item)
-                            if lookup:
-                                score_data = lookup
-                                break
-
-                        item_widget.score_data = score_data
-                        item_widget.is_extra = False
-
-                        # Mark as manual if the AI didn't calculate a score for this grouping
-                        item_widget.is_manual = (score_data is None)
                     else:
-                        item_widget.score_data = None
-                        item_widget.is_manual = False
-                        item_widget.is_extra = True
+                        t_cat = item_widget.orig_cat
+                        t_item_raw = item_widget.orig_name
+
+                        if anchor_item:
+                            ai_mapping = contract_info['ai']['items']
+                            score_found = None
+
+                            # Search through AI results for this target vs the anchor master
+                            for m_cat, t_items in ai_mapping.get(t_cat, {}).items():
+                                for t_unique, match_data in t_items.items():
+                                    # Relaxed matching check for the raw names
+                                    if match_data.get('target_raw_name') == t_item_raw:
+                                        for m_unique, s_data in match_data.get('scores', {}).items():
+                                            if s_data.get('master_raw_name') == anchor_item:
+                                                if not score_found or s_data.get('total', 0) > score_found.get('total',
+                                                                                                               0):
+                                                    score_found = s_data
+
+                            item_widget.score_data = score_found
+                            item_widget.is_extra = False
+                            # If no AI score exists for this specific combination, mark as manual
+                            item_widget.is_manual = (score_found is None)
+                        else:
+                            # Item is in a bucket without a master item (Extra Item)
+                            item_widget.score_data = None
+                            item_widget.is_manual = False
+                            item_widget.is_extra = True
 
                     item_widget.threshold = self.current_threshold
                     item_widget.update_display()
