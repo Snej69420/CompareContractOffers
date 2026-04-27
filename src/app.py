@@ -1,10 +1,12 @@
 import sys
 import threading
 from pathlib import Path
+import pandas as pd
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QScrollArea, QTabWidget, QFileDialog, QMessageBox,
+    QTableView, QHeaderView
 )
 
 from PySide6.QtCore import Qt, Signal, QObject, QTimer, QPoint
@@ -16,7 +18,9 @@ from src.Compare.scoring import ScoringEngine
 from src.UI.ManualMatching.MatchItem import MatchItem
 from src.UI.ManualMatching.Cluster import Cluster
 from src.UI.ManualMatching.Unmatched import Unmatched
+from src.UI.DataModel.DataTable import DataTableModel
 from src.UI.DataModel.DocumentTab import DocumentTabWidget
+from src.UI.DataModel.ReportGenerator import ReportGenerator
 
 class WorkerSignals(QObject):
     finished = Signal(object, object, object, object)
@@ -96,11 +100,42 @@ class MainWindow(QMainWindow):
         # Finally, register this tab into the Tab System
         self.tabs.addTab(self.comparison_tab, "AI Vergelijking")
 
-        # --- 5. STATE VARIABLES ---
+        # --- 5. REPORT PREVIEW TAB ---
+        self.preview_tab = QWidget()
+        self.preview_layout = QVBoxLayout(self.preview_tab)
+
+        self.preview_header = QLabel("Project: ...")
+        self.preview_header.setStyleSheet("font-size: 18px; font-weight: bold;")
+        self.preview_layout.addWidget(self.preview_header)
+
+        self.preview_table = QTableView()
+        self.preview_table.setAlternatingRowColors(True)
+        self.preview_table.setStyleSheet("alternate-background-color: #f9f9f9; background-color: #ffffff;")
+        self.preview_table.setWordWrap(True)
+        self.preview_table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+
+        self.preview_layout.addWidget(self.preview_table)
+        self.tabs.addTab(self.preview_tab, "Rapport Voorbeeld")
+
+        # --- 6. THE DEBOUNCER TIMER ---
+        self.preview_timer = QTimer()
+        self.preview_timer.setSingleShot(True)
+        self.preview_timer.timeout.connect(self.generate_and_render_preview)
+
+        # --- 7. STATE VARIABLES ---
         self.path_a = None
         self.path_b = None
         self.global_score_lookup = {}
         self.cluster_count = 0
+
+        self.tabs.currentChanged.connect(self.on_tab_changed)
+
+    def on_tab_changed(self, index):
+        """Fires whenever the user clicks a new tab."""
+        # Check if the newly opened tab is the Preview Tab
+        if self.tabs.widget(index) == self.preview_tab:
+            # Force Qt to resize rows now that the widget is physically visible!
+            self.preview_table.resizeRowsToContents()
 
     def load_documents(self):
         # 1. Ask for Document A
@@ -122,8 +157,11 @@ class MainWindow(QMainWindow):
             df_a = loader.load_excel(self.path_a)
             df_b = loader.load_excel(self.path_b)
 
+            self.df_a = df_a
+            self.df_b = df_b
+
             # 3. Manage Tabs: Remove old document tabs if they exist
-            while self.tabs.count() > 1:
+            while self.tabs.count() > 2:
                 self.tabs.removeTab(0)
 
             # 4. Create and insert the new Document Tabs
@@ -168,6 +206,10 @@ class MainWindow(QMainWindow):
         self.global_score_lookup = lookup
         self.cluster_count = 0
 
+        # --- FIX 1: Clear the dangling pointer so a 2nd run doesn't crash ---
+        if hasattr(self, 'add_cluster_btn'):
+            del self.add_cluster_btn
+
         clusters.sort(key=lambda x: x.get('cluster_score', 0.0), reverse=True)
 
         # 1. Render AI Clusters
@@ -186,6 +228,8 @@ class MainWindow(QMainWindow):
         # 3. Render Parking Lot at the very bottom
         self.parking_lot = Unmatched(unmatched_a, unmatched_b)
         self.cluster_layout.addWidget(self.parking_lot)
+
+        # Navigation and Scrolling
         self.parking_lot.requestNeighborMove.connect(self.handle_neighbor_move)
         self.parking_lot.requestGlobalNavigation.connect(self.handle_global_navigation)
         self.parking_lot.list_a.currentItemChanged.connect(
@@ -194,7 +238,15 @@ class MainWindow(QMainWindow):
         self.parking_lot.list_b.currentItemChanged.connect(
             lambda current, previous, lw=self.parking_lot.list_b: self.auto_scroll_to_item(lw, current)
         )
+
+        # --- FIX 2: Connect the Parking Lot to the Reactive Preview Tab ---
+        self.parking_lot.list_a.itemDropped.connect(self.trigger_preview_update)
+        self.parking_lot.list_b.itemDropped.connect(self.trigger_preview_update)
+        self.parking_lot.list_a.itemEjected.connect(lambda _: self.trigger_preview_update())
+        self.parking_lot.list_b.itemEjected.connect(lambda _: self.trigger_preview_update())
+
         self.parking_lot.update_parking_lot()
+        self.trigger_preview_update()
 
     def on_ai_error(self, err_msg: str):
         self.status_label.setText(f"Foutmelding: {err_msg}")
@@ -214,12 +266,18 @@ class MainWindow(QMainWindow):
             lambda current, previous, lw=widget.list_b: self.auto_scroll_to_item(lw, current)
         )
 
-        # Insert above the 'Add Cluster' button if it exists, else append
+        widget.list_a.itemDropped.connect(self.trigger_preview_update)
+        widget.list_b.itemDropped.connect(self.trigger_preview_update)
+        widget.list_a.itemEjected.connect(lambda _: self.trigger_preview_update())
+        widget.list_b.itemEjected.connect(lambda _: self.trigger_preview_update())
+
         if hasattr(self, 'add_cluster_btn'):
             idx = self.cluster_layout.indexOf(self.add_cluster_btn)
             self.cluster_layout.insertWidget(idx, widget)
         else:
             self.cluster_layout.addWidget(widget)
+
+
 
     def create_cluster(self):
         self.cluster_count += 1
@@ -237,9 +295,11 @@ class MainWindow(QMainWindow):
         # Safely destroy the UI element
         widget.deleteLater()
         self.cluster_layout.removeWidget(widget)
+        self.trigger_preview_update()
 
     def send_to_unmatched(self, match_item: MatchItem):
         self.parking_lot.receive_items([match_item])
+        self.trigger_preview_update()
 
     def handle_neighbor_move(self, source_widget, match_item, direction):
         # 1. Find where the source widget lives in the layout
@@ -272,6 +332,7 @@ class MainWindow(QMainWindow):
 
         target_widget.inject_item(match_item)
         target_widget.focus_on_item(match_item)
+        self.trigger_preview_update()
 
     def handle_global_navigation(self, source_widget, side, direction):
         idx = self.cluster_layout.indexOf(source_widget)
@@ -345,6 +406,95 @@ class MainWindow(QMainWindow):
         elif absolute_y > deadzone_bottom:
             # Item is too low down, push the "camera" down
             scrollbar.setValue(int(absolute_y - (2 * viewport_height / 3)))
+
+    def trigger_preview_update(self):
+        """Debouncer: Waits 100ms for the user to finish moving items before rendering."""
+        self.preview_timer.start(100)
+
+    def gather_current_state(self):
+        """Scrapes the UI to build the data structure needed by the ReportGenerator."""
+        clusters_data = []
+
+        # 1. Scrape AI Clusters
+        for i in range(self.cluster_layout.count()):
+            widget = self.cluster_layout.itemAt(i).widget()
+
+            if isinstance(widget, QPushButton):
+                continue  # Skip the "Add Cluster" button
+
+            # If it has a list_a, it's a cluster!
+            if hasattr(widget, 'list_a') and not hasattr(widget, 'update_parking_lot'):
+                items_a = widget.list_a.get_items()
+                items_b = widget.list_b.get_items()
+                if items_a or items_b:
+                    clusters_data.append({'A': items_a, 'B': items_b})
+
+        # 2. Scrape Parking Lot
+        unmatched_a = self.parking_lot.list_a.get_items()
+        unmatched_b = self.parking_lot.list_b.get_items()
+        unmatched_items = unmatched_a + unmatched_b
+
+        return clusters_data, unmatched_items
+
+    def generate_and_render_preview(self):
+        if not self.path_a or not self.path_b: return
+
+        clusters_data, unmatched_items = self.gather_current_state()
+
+        fingerprint = self.get_state_fingerprint(clusters_data, unmatched_items)
+        if hasattr(self, '_last_fingerprint') and self._last_fingerprint == fingerprint:
+            return
+        self._last_fingerprint = fingerprint
+
+        names = {
+            'A': getattr(self, 'df_a', pd.DataFrame()).attrs.get('contractor', 'A'),
+            'B': getattr(self, 'df_b', pd.DataFrame()).attrs.get('contractor', 'B')
+        }
+        project_name = getattr(self, 'df_a', pd.DataFrame()).attrs.get('project', 'Project Onbekend')
+        self.preview_header.setText(f"🏗️ Project: {project_name}")
+
+        generator = ReportGenerator(names)
+
+        # --- FIXED: Unpack the new 3-tuple ---
+        df_data, df_colors, spans = generator.generate(clusters_data, unmatched_items)
+
+        model = DataTableModel(df_data, df_colors)
+        self.preview_table.setModel(model)
+        self.preview_table.clearSpans()
+
+        header = self.preview_table.horizontalHeader()
+        header.setStretchLastSection(False)
+        self.preview_table.resizeColumnsToContents()
+
+        for i in range(model.columnCount()):
+            col_name = str(model.headerData(i, Qt.Orientation.Horizontal)).lower()
+            if 'naam' in col_name:
+                header.setSectionResizeMode(i, QHeaderView.ResizeMode.Stretch)
+            else:
+                header.setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
+
+        # --- NEW: Apply the Vertical Cell Spans ---
+        for row_start, row_span, c_name in spans:
+            for col_idx in range(model.columnCount()):
+                # Check if this column belongs to the contractor we are spanning
+                col_header = str(model.headerData(col_idx, Qt.Orientation.Horizontal))
+                if c_name in col_header:
+                    self.preview_table.setSpan(row_start, col_idx, row_span, 1)
+
+    def get_state_fingerprint(self, clusters_data, unmatched_items):
+        """Creates a unique string identifying the current exact layout of items."""
+        fingerprint = ""
+        for idx, cluster in enumerate(clusters_data):
+            a_names = ",".join([str(i.name) for i in cluster['A']])
+            b_names = ",".join([str(i.name) for i in cluster['B']])
+            fingerprint += f"C{idx}:A[{a_names}]B[{b_names}]|"
+
+        u_names = ",".join([str(i.name) for i in unmatched_items])
+        fingerprint += f"U:[{u_names}]"
+
+        return fingerprint
+
+
 
 
 if __name__ == "__main__":
