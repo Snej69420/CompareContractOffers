@@ -1,7 +1,13 @@
+import pandas as pd
+
 class MatchItem:
     def __init__(self, raw_data: dict, original_id: int, side: str):
         self.raw_data = raw_data
-        self.name = raw_data.get('Naam', 'Onbekend')
+        name = raw_data.get('Naam', 'Onbekend')
+        if pd.isna(name) or str(name).strip() == "":
+            self.name = "Onbekend"
+        else:
+            self.name = str(name)
 
         # Clean quantities and units
         try:
