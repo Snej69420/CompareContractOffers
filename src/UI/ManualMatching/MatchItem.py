@@ -1,7 +1,7 @@
 import pandas as pd
 
 class MatchItem:
-    def __init__(self, raw_data: dict, original_id: int, side: str):
+    def __init__(self, raw_data: dict, original_id: int, doc_key: str):
         self.raw_data = raw_data
         name = raw_data.get('Naam', 'Onbekend')
         if pd.isna(name) or str(name).strip() == "":
@@ -18,7 +18,7 @@ class MatchItem:
         self.unit = raw_data.get('unit', '')
 
         self.original_id = original_id
-        self.side = side
+        self.doc_key = doc_key  # NEW: Tracks which document this belongs to
         self.current_score = 0.0
         self.best_match_name = ""
 

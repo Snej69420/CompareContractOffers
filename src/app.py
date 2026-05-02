@@ -105,7 +105,19 @@ class MainWindow(QMainWindow):
     def on_ai_finished(self, clusters: list[dict], lookup: dict, unmatched_a: list, unmatched_b: list):
         self.top_bar.set_status(f"Analyse voltooid. {len(clusters)} clusters gevonden.")
         self.top_bar.set_analyze_enabled(True)
-        self.tab_manager.comparison_tab.populate_from_ai(clusters, lookup, unmatched_a, unmatched_b)
+
+        # 1. Grab the keys for the two currently processed documents
+        paths = list(self.loaded_documents.keys())
+        doc_keys = [paths[0].name, paths[1].name]
+
+        # 2. Package the unmatched lists into the new generalized dictionary
+        unmatched_dict = {
+            doc_keys[0]: unmatched_a,
+            doc_keys[1]: unmatched_b
+        }
+
+        # 3. Pass all arguments in the exact correct order!
+        self.tab_manager.comparison_tab.populate_from_ai(doc_keys, clusters, lookup, unmatched_dict)
 
     def on_ai_error(self, err_msg: str):
         self.top_bar.set_status(f"Foutmelding: {err_msg}")
@@ -113,13 +125,11 @@ class MainWindow(QMainWindow):
 
     def on_comparison_state_changed(self):
         """Passes data to Preview Tab whenever items move."""
-        paths = list(self.loaded_documents.keys())
-        if len(paths) >= 2:
-            df_a = self.loaded_documents[paths[0]]
-            df_b = self.loaded_documents[paths[1]]
-
+        if len(self.loaded_documents) >= 2:
             clusters, unmatched = self.tab_manager.comparison_tab.gather_current_state()
-            self.tab_manager.preview_tab.request_update(clusters, unmatched, df_a, df_b)
+            # Pass the entire dictionary of N-documents
+            self.tab_manager.preview_tab.request_update(clusters, unmatched, self.loaded_documents)
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

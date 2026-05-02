@@ -32,18 +32,13 @@ class PreviewTab(QWidget):
         # State Tracking
         self._pending_clusters = []
         self._pending_unmatched = []
-        self._df_a = pd.DataFrame()
-        self._df_b = pd.DataFrame()
+        self._loaded_documents = {}
         self._last_fingerprint = ""
 
-    def request_update(self, clusters_data: list, unmatched_items: list, df_a: pd.DataFrame, df_b: pd.DataFrame):
-        """Called by the main app to safely push new data and trigger the debouncer."""
+    def request_update(self, clusters_data: list, unmatched_items: list, loaded_documents: dict):
         self._pending_clusters = clusters_data
         self._pending_unmatched = unmatched_items
-        self._df_a = df_a
-        self._df_b = df_b
-
-        # Start or reset the 100ms timer
+        self._loaded_documents = loaded_documents
         self.preview_timer.start(100)
 
     def force_resize(self):
@@ -54,42 +49,47 @@ class PreviewTab(QWidget):
         """Creates a unique string identifying the current exact layout of items."""
         fingerprint = ""
         for idx, cluster in enumerate(clusters_data):
-            a_names = ",".join([str(i.name) for i in cluster['A']])
-            b_names = ",".join([str(i.name) for i in cluster['B']])
-            fingerprint += f"C{idx}:A[{a_names}]B[{b_names}]|"
+            # Dynamically sort and append whatever keys are in the cluster
+            cluster_str = ""
+            for key in sorted(cluster.keys()):
+                names = ",".join([str(i.name) for i in cluster[key]])
+                cluster_str += f"{key}[{names}]"
+            fingerprint += f"C{idx}:{cluster_str}|"
 
         u_names = ",".join([str(i.name) for i in unmatched_items])
         fingerprint += f"U:[{u_names}]"
+
         return fingerprint
 
     def _generate_and_render(self):
-        if self._df_a.empty or self._df_b.empty:
+        if not self._loaded_documents:
             return
 
-        # 1. Fingerprint Check (Don't render if nothing actually moved)
         fingerprint = self._get_state_fingerprint(self._pending_clusters, self._pending_unmatched)
         if self._last_fingerprint == fingerprint:
             return
         self._last_fingerprint = fingerprint
 
-        # 2. Extract Metadata
-        names = {
-            'A': self._df_a.attrs.get('contractor', 'A'),
-            'B': self._df_b.attrs.get('contractor', 'B')
-        }
-        project_name = self._df_a.attrs.get('project', 'Project Onbekend')
+        # 1. Extract Metadata Dynamically for N Documents
+        names = {}
+        project_name = "Project Onbekend"
+
+        for path, df in self._loaded_documents.items():
+            names[path.name] = df.attrs.get('contractor', path.stem)
+            if project_name == "Project Onbekend":  # Just grab the first project name we find
+                project_name = df.attrs.get('project', 'Project Onbekend')
+
         self.header_label.setText(f"📁 Project: {project_name}")
 
-        # 3. Generate Data
+        # 2. Generate Data (The legacy bridge is GONE!)
         generator = ReportGenerator(names)
         df_data, df_colors, spans = generator.generate(self._pending_clusters, self._pending_unmatched)
 
-        # 4. Render Table Model
+        # 3. Render Table Model
         model = DataTableModel(df_data, df_colors)
         self.table.setModel(model)
         self.table.clearSpans()
 
-        # 5. Format Columns
         header = self.table.horizontalHeader()
         header.setStretchLastSection(False)
         self.table.resizeColumnsToContents()
@@ -101,7 +101,6 @@ class PreviewTab(QWidget):
             else:
                 header.setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
 
-        # 6. Apply Vertical Spans
         for row_start, row_span, c_name in spans:
             for col_idx in range(model.columnCount()):
                 col_header = str(model.headerData(col_idx, Qt.Orientation.Horizontal))

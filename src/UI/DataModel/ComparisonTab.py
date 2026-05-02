@@ -1,9 +1,12 @@
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QScrollArea, QPushButton
+from pathlib import Path
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QPushButton, QMessageBox
 from PySide6.QtCore import Qt, Signal, QTimer, QPoint
+from PySide6.QtGui import QIcon, QShortcut, QKeySequence
 
 from src.UI.ManualMatching.Cluster import Cluster
 from src.UI.ManualMatching.Unmatched import Unmatched
 from src.UI.ManualMatching.MatchItem import MatchItem
+from src.UI.DataModel.Shortcut import ShortcutDialog
 
 
 class ComparisonTab(QWidget):
@@ -15,8 +18,39 @@ class ComparisonTab(QWidget):
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
 
+        # --- NEW: Top Header Bar for the Info Button ---
+        self.top_bar_layout = QHBoxLayout()
+        self.top_bar_layout.setContentsMargins(0, 10, 20, 5)
+
+        self.info_btn = QPushButton()
+        # Ensure you have an info.svg in your assets folder!
+        icon_dir = Path(__file__).parent.parent.parent.parent / "assets"
+        self.info_btn.setIcon(QIcon(str(icon_dir / "info.svg")))
+        self.info_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.info_btn.setToolTip("Bekijk sneltoetsen")
+        self.info_btn.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                border: none;
+                border-radius: 12px;
+                padding: 4px;
+            }
+            QPushButton:hover {
+                background-color: #e0e0e0;
+            }
+        """)
+        self.info_btn.clicked.connect(self.show_shortcuts_info)
+
+        # Push the button to the right side
+        self.top_bar_layout.addStretch()
+        self.top_bar_layout.addWidget(self.info_btn)
+
+        self.layout.addLayout(self.top_bar_layout)
+        # -----------------------------------------------
+
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setStyleSheet("QScrollArea { border: none; }")
         self.cluster_container = QWidget()
         self.cluster_layout = QVBoxLayout(self.cluster_container)
         self.cluster_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
@@ -30,8 +64,18 @@ class ComparisonTab(QWidget):
         self.parking_lot = None
         self.add_cluster_btn = None
 
-    def populate_from_ai(self, clusters: list[dict], lookup: dict, unmatched_a: list, unmatched_b: list):
+        self.doc_keys:list[str] = []
+
+        self.new_cluster_shortcut = QShortcut(QKeySequence("Ctrl+N"), self)
+        self.new_cluster_shortcut.activated.connect(self.create_cluster)
+
+    def show_shortcuts_info(self):
+        dialog = ShortcutDialog(self)
+        dialog.exec()
+
+    def populate_from_ai(self, doc_keys: list[str], clusters: list[dict], lookup: dict, unmatched_dict: dict):
         """Builds the entire UI based on the AI output."""
+        self.doc_keys = doc_keys
         self.global_score_lookup = lookup
         self.cluster_count = 0
 
@@ -59,47 +103,36 @@ class ComparisonTab(QWidget):
         self.add_cluster_btn.clicked.connect(self.create_cluster)
         self.cluster_layout.addWidget(self.add_cluster_btn)
 
-        # 3. Render Parking Lot at the very bottom
-        self.parking_lot = Unmatched(unmatched_a, unmatched_b)
+        self.parking_lot = Unmatched(self.doc_keys, unmatched_dict)
         self.cluster_layout.addWidget(self.parking_lot)
 
-        # 4. Wire up Navigation and Scrolling
         self.parking_lot.requestNeighborMove.connect(self.handle_neighbor_move)
         self.parking_lot.requestGlobalNavigation.connect(self.handle_global_navigation)
-        self.parking_lot.list_a.currentItemChanged.connect(
-            lambda current, previous, lw=self.parking_lot.list_a: self.auto_scroll_to_item(lw, current)
-        )
-        self.parking_lot.list_b.currentItemChanged.connect(
-            lambda current, previous, lw=self.parking_lot.list_b: self.auto_scroll_to_item(lw, current)
-        )
 
-        # 5. Connect UI changes to the stateChanged signal
-        self.parking_lot.list_a.itemDropped.connect(self.stateChanged.emit)
-        self.parking_lot.list_b.itemDropped.connect(self.stateChanged.emit)
-        self.parking_lot.list_a.itemEjected.connect(lambda _: self.stateChanged.emit())
-        self.parking_lot.list_b.itemEjected.connect(lambda _: self.stateChanged.emit())
+        # Dynamically bind signals for N lists
+        for key, lst in self.parking_lot.lists.items():
+            lst.currentItemChanged.connect(
+                lambda current, previous, lw=lst: self.auto_scroll_to_item(lw, current)
+            )
+            lst.itemDropped.connect(self.stateChanged.emit)
+            lst.itemEjected.connect(lambda _: self.stateChanged.emit())
 
         self.parking_lot.update_parking_lot()
         self.stateChanged.emit()
 
     def auto_create_cluster(self, cluster_data: dict, index: int):
-        widget = Cluster(cluster_data, index, self.global_score_lookup)
+        widget = Cluster(self.doc_keys, cluster_data, index, self.global_score_lookup)
         widget.itemToParkingLot.connect(self.send_to_unmatched)
         widget.clusterRemoved.connect(self.remove_cluster)
         widget.requestNeighborMove.connect(self.handle_neighbor_move)
         widget.requestGlobalNavigation.connect(self.handle_global_navigation)
 
-        widget.list_a.currentItemChanged.connect(
-            lambda current, previous, lw=widget.list_a: self.auto_scroll_to_item(lw, current)
-        )
-        widget.list_b.currentItemChanged.connect(
-            lambda current, previous, lw=widget.list_b: self.auto_scroll_to_item(lw, current)
-        )
-
-        widget.list_a.itemDropped.connect(self.stateChanged.emit)
-        widget.list_b.itemDropped.connect(self.stateChanged.emit)
-        widget.list_a.itemEjected.connect(lambda _: self.stateChanged.emit())
-        widget.list_b.itemEjected.connect(lambda _: self.stateChanged.emit())
+        for key, lst in widget.lists.items():
+            lst.currentItemChanged.connect(
+                lambda current, previous, lw=lst: self.auto_scroll_to_item(lw, current)
+            )
+            lst.itemDropped.connect(self.stateChanged.emit)
+            lst.itemEjected.connect(lambda _: self.stateChanged.emit())
 
         if self.add_cluster_btn:
             idx = self.cluster_layout.indexOf(self.add_cluster_btn)
@@ -115,13 +148,46 @@ class ComparisonTab(QWidget):
         scroll_bar = self.scroll_area.verticalScrollBar()
         scroll_bar.setValue(scroll_bar.maximum())
 
-    def remove_cluster(self, widget: Cluster, items_a: list, items_b: list):
-        if items_a or items_b:
-            self.parking_lot.receive_items(items_a + items_b)
+    def remove_cluster(self, widget: Cluster, all_items: list):
+        if all_items:
+            self.parking_lot.receive_items(all_items)
 
+        # --- 1. UX FEATURE: Remember Focus State ---
+        # Find out which specific column the user was actively focused on
+        active_key = self.doc_keys[0] if self.doc_keys else None
+        for key, lst in widget.lists.items():
+            if lst.hasFocus():
+                active_key = key
+                break
+
+        # --- 2. Find the Neighboring Cluster ---
+        idx = self.cluster_layout.indexOf(widget)
+        # Default to the cluster above it. If it's the top cluster, try the one below it.
+        target_idx = idx - 1 if idx > 0 else idx + 1
+
+        target_widget = None
+        if 0 <= target_idx < self.cluster_layout.count():
+            target_widget = self.cluster_layout.itemAt(target_idx).widget()
+
+            # If the neighbor happens to be the "New Cluster" button, skip over it!
+            if isinstance(target_widget, QPushButton):
+                target_idx = target_idx + 1 if idx == 0 else target_idx - 1
+                if 0 <= target_idx < self.cluster_layout.count():
+                    target_widget = self.cluster_layout.itemAt(target_idx).widget()
+
+        # --- 3. Destroy the Widget ---
         widget.deleteLater()
         self.cluster_layout.removeWidget(widget)
         self.stateChanged.emit()
+
+        # --- 4. Apply Focus to the Neighbor ---
+        if target_widget and hasattr(target_widget, 'lists') and active_key:
+            target_list = target_widget.lists.get(active_key)
+            if target_list:
+                target_list.setFocus()
+                # Select the first item in the neighbor so they can keep typing immediately
+                if target_list.count() > 0:
+                    target_list.setCurrentRow(0)
 
     def send_to_unmatched(self, match_item: MatchItem):
         self.parking_lot.receive_items([match_item])
@@ -153,7 +219,7 @@ class ComparisonTab(QWidget):
         target_widget.focus_on_item(match_item)
         self.stateChanged.emit()
 
-    def handle_global_navigation(self, source_widget, side, direction):
+    def handle_global_navigation(self, source_widget, doc_key, direction):
         idx = self.cluster_layout.indexOf(source_widget)
         target_idx = idx - 1 if direction == "up" else idx + 1
 
@@ -168,7 +234,7 @@ class ComparisonTab(QWidget):
                 return
             target_widget = self.cluster_layout.itemAt(target_idx).widget()
 
-        target_list = target_widget.list_a if side == 'A' else target_widget.list_b
+        target_list = target_widget.lists[doc_key]
         target_list.setFocus()
 
         if target_list.count() > 0:
@@ -217,13 +283,25 @@ class ComparisonTab(QWidget):
             widget = self.cluster_layout.itemAt(i).widget()
             if isinstance(widget, QPushButton):
                 continue
-            if hasattr(widget, 'list_a') and not hasattr(widget, 'update_parking_lot'):
-                items_a = widget.list_a.get_items()
-                items_b = widget.list_b.get_items()
-                if items_a or items_b:
-                    clusters_data.append({'A': items_a, 'B': items_b})
 
-        unmatched_a = self.parking_lot.list_a.get_items()
-        unmatched_b = self.parking_lot.list_b.get_items()
+            # Look for 'lists' instead of 'list_a'
+            if hasattr(widget, 'lists') and not hasattr(widget, 'update_parking_lot'):
+                cluster_dict = {}
+                has_items = False
 
-        return clusters_data, unmatched_a + unmatched_b
+                # Dynamically scrape all N columns
+                for key, lst in widget.lists.items():
+                    items = lst.get_items()
+                    cluster_dict[key] = items
+                    if items:
+                        has_items = True
+
+                if has_items:
+                    clusters_data.append(cluster_dict)
+
+        # Flatten all unmatched items from N columns into a single list
+        unmatched_items = []
+        for lst in self.parking_lot.lists.values():
+            unmatched_items.extend(lst.get_items())
+
+        return clusters_data, unmatched_items
