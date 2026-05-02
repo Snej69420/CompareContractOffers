@@ -7,38 +7,59 @@ class ContractLoader:
         if isinstance(file_path, str):
             file_path = Path(file_path)
 
-        # --- PASS 1: SCRAPE ONLY THE METADATA (Rows 1 to 9) ---
-        header_data = pd.read_excel(file_path, nrows=9, header=None).fillna("")
+        # 1. Read the raw file without headers to find out where the table actually starts
+        raw_df = pd.read_excel(file_path, header=None)
 
+        table_start_row = -1
+
+        # 2. Dynamically search for the header row
+        for idx, row in raw_df.iterrows():
+            # Convert row to a list of lowercase strings for easy searching
+            row_vals = row.astype(str).str.lower().str.strip().tolist()
+
+            # If we find our core columns in this row, we know it's the header!
+            if 'naam' in row_vals and ('aantal' in row_vals or 'eenheid' in row_vals):
+                table_start_row = idx
+                break
+
+        if table_start_row == -1:
+            raise ValueError(f"Fout: Kon de tabelkop (met o.a. 'Naam' en 'Aantal') niet vinden in {file_path.name}.")
+
+        # 3. --- Extract Metadata (Scan everything ABOVE the table) ---
         project_name = "Onbekend Project"
         contractor_name = file_path.stem
 
-        for _, row in header_data.iterrows():
-            # Convert the row into a clean list of strings
-            cells = [str(cell).strip() for cell in row.values]
+        metadata_df = raw_df.iloc[:table_start_row].fillna("")
 
-            # If the row has at least two columns, check the first column (the label)
-            if len(cells) >= 2:
-                label = cells[0].lower()
-                value = cells[1]
+        for _, row in metadata_df.iterrows():
+            # Clean up the cells and filter out empty ones
+            cells = [str(cell).strip() for cell in row.values if str(cell).strip()]
 
-                # Check for Project Name keywords
-                if "werf naam" in label or "project" in label:
-                    if value:
-                        project_name = value
+            # Slide through the cells to find Key-Value pairs
+            for i in range(len(cells) - 1):
+                label = cells[i].lower()
+                value = cells[i + 1]
 
-                # Check for Contractor Name keywords
+                if "werf" in label or "project" in label:
+                    project_name = value
                 elif "bedrijfsnaam" in label or "aannemer" in label or "contractant" in label:
-                    if value:
-                        contractor_name = value
+                    contractor_name = value
 
-        # --- PASS 2: LOAD THE ACTUAL DATA (Skip the metadata) ---
-        df = pd.read_excel(file_path, header=9)
+        # 4. --- Load the Actual Data Table ---
+        # Now we know exactly where the header is, we let pandas parse it properly!
+        df = pd.read_excel(file_path, header=table_start_row)
 
+        # Strip accidental whitespace from column names
+        df.columns = [str(c).strip() for c in df.columns]
+
+        # 5. Clean up the data
         if 'Naam' in df.columns:
+            # Drop rows where 'Naam' is empty (often artifacts of formatting at the bottom of sheets)
             df = df.dropna(subset=['Naam'])
+            # Drop items where 'Naam' is just whitespace
+            df = df[df['Naam'].astype(str).str.strip() != ""]
 
-        # --- ATTACH METADATA TO DATAFRAME ---
+        # 6. Attach metadata
         df.attrs['project'] = str(project_name).strip()
         df.attrs['contractor'] = str(contractor_name).strip()
 

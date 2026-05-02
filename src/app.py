@@ -14,15 +14,10 @@ from PySide6.QtGui import QColor, QPalette
 from src.AIWorker import AIWorker
 
 from src.Compare.loader import ContractLoader
-from src.Compare.scoring import ScoringEngine
+from src.UI.Controls import TopBarControls
+from src.UI.TabManager import MainTabWidget
 
-from src.UI.ManualMatching.MatchItem import MatchItem
-from src.UI.ManualMatching.Cluster import Cluster
-from src.UI.ManualMatching.Unmatched import Unmatched
-
-from src.UI.DataModel.DataTable import DataTableModel
 from src.UI.DataModel.DocumentTab import DocumentTabWidget
-from src.UI.DataModel.ReportGenerator import ReportGenerator
 from src.UI.DataModel.ComparisonTab import ComparisonTab
 from src.UI.DataModel.PreviewTab import PreviewTab
 
@@ -32,140 +27,103 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("AI Offertevergelijker")
         self.resize(1000, 800)
 
-        # --- 1. MAIN WINDOW SETUP ---
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         self.main_layout = QVBoxLayout(central_widget)
 
-        # --- 2. TOP BAR CONTROLS ---
-        top_bar = QHBoxLayout()
+        # --- 1. UI COMPONENTS ---
+        self.top_bar = TopBarControls()
+        self.tab_manager = MainTabWidget()
 
-        self.load_btn = QPushButton("Offertes inladen 📂")
-        self.load_btn.clicked.connect(self.load_documents)
+        self.main_layout.addWidget(self.top_bar)
+        self.main_layout.addWidget(self.tab_manager)
 
-        self.run_btn = QPushButton("Start analyse")
-        self.run_btn.setStyleSheet("background-color: #007bff; color: white; font-weight: bold; padding: 8px;")
-        self.run_btn.clicked.connect(self.run_comparison)
+        # --- 2. STATE TRACKING ---
+        # Future-proofed for N-documents: { Path: DataFrame }
+        self.loaded_documents = {}
 
-        self.status_label = QLabel("Klaar voor gebruik.")
-        self.status_label.setStyleSheet("color: black;")
+        # --- 3. EVENT ROUTING ---
+        self.top_bar.loadRequested.connect(self.load_documents)
+        self.top_bar.analyzeRequested.connect(self.run_comparison)
 
-        top_bar.addWidget(self.load_btn)
-        top_bar.addWidget(self.run_btn)
-        top_bar.addWidget(self.status_label)
-        top_bar.addStretch()
-
-        self.main_layout.addLayout(top_bar)
-
-        # --- 3. MASTER TAB SYSTEM ---
-        self.tabs = QTabWidget()
-        self.main_layout.addWidget(self.tabs)
-
-        # --- 4. AI COMPARISON TAB ---
-        self.comparison_tab = ComparisonTab()
-        self.tabs.addTab(self.comparison_tab, "AI Vergelijking")
-
-        # --- 5. REPORT PREVIEW TAB ---
-        self.preview_tab = PreviewTab()
-        self.tabs.addTab(self.preview_tab, "Rapport Voorbeeld")
-
-        # --- 6. EVENT ROUTING ---
-        # When ComparisonTab changes, tell MainWindow to push data to PreviewTab
-        self.comparison_tab.stateChanged.connect(self.on_comparison_state_changed)
-        self.tabs.currentChanged.connect(self.on_tab_changed)
-
-        # --- 7. STATE VARIABLES ---
-        self.path_a = None
-        self.path_b = None
-        self.global_score_lookup = {}
-
-        self.tabs.currentChanged.connect(self.on_tab_changed)
-
-    def on_tab_changed(self, index):
-        """Notifies the PreviewTab to fix its UI when it becomes visible."""
-        # Check if the newly opened tab is the Preview Tab
-        if self.tabs.widget(index) == self.preview_tab:
-            self.preview_tab.force_resize()
-
-    def on_comparison_state_changed(self):
-        """Passes data from Comparison Tab -> Preview Tab whenever items move."""
-        if hasattr(self, 'df_a') and hasattr(self, 'df_b'):
-            clusters, unmatched = self.comparison_tab.gather_current_state()
-            self.preview_tab.request_update(clusters, unmatched, self.df_a, self.df_b)
+        self.tab_manager.documentUnloaded.connect(self.unload_document)
+        self.tab_manager.stateChanged.connect(self.on_comparison_state_changed)
 
     def load_documents(self):
-        # 1. Ask for Document A
-        path_a, _ = QFileDialog.getOpenFileName(self, "Selecteer Offerte A", "", "Excel Files (*.xlsx *.xls)")
-        if not path_a: return  # User cancelled
-
-        # 2. Ask for Document B
-        path_b, _ = QFileDialog.getOpenFileName(self, "Selecteer Offerte B", "", "Excel Files (*.xlsx *.xls)")
-        if not path_b: return
-
-        self.status_label.setText("Bestanden inladen...")
-        QApplication.processEvents()  # Force UI to update
-
-        try:
-            self.path_a = Path(path_a)
-            self.path_b = Path(path_b)
-
-            loader = ContractLoader()
-            df_a = loader.load_excel(self.path_a)
-            df_b = loader.load_excel(self.path_b)
-
-            self.df_a = df_a
-            self.df_b = df_b
-
-            # 3. Manage Tabs: Remove old document tabs if they exist
-            while self.tabs.count() > 2:
-                self.tabs.removeTab(0)
-
-            # 4. Create and insert the new Document Tabs
-            tab_a = DocumentTabWidget(df_a, self.path_a.name)
-            tab_b = DocumentTabWidget(df_b, self.path_b.name)
-
-            self.tabs.insertTab(0, tab_a, "📄 Offerte A")
-            self.tabs.insertTab(1, tab_b, "📄 Offerte B")
-
-            # Switch to first tab so user sees the loaded data
-            self.tabs.setCurrentIndex(0)
-            self.status_label.setText(f"Klaar voor gebruik. ({len(df_a)} en {len(df_b)} items)")
-
-        except Exception as e:
-            QMessageBox.critical(self, "Laadfout", f"Fout bij inladen van bestanden:\n{str(e)}")
-            self.status_label.setText("Fout bij inladen.")
-
-    def run_comparison(self):
-        if not self.path_a or not self.path_b:
-            QMessageBox.warning(self, "Geen bestanden", "Laad eerst twee offertes in.")
+        file_paths, _ = QFileDialog.getOpenFileNames(self, "Selecteer Offertes", "", "Excel Files (*.xlsx *.xls)")
+        if not file_paths:
             return
 
-        self.status_label.setText("Bezig met analyseren... Even geduld.")
-        self.run_btn.setEnabled(False)
+        self.top_bar.set_status("Bestanden inladen...")
+        QApplication.processEvents()
 
-        self.tabs.setCurrentWidget(self.comparison_tab)
+        loader = ContractLoader()
+        errors = []
 
-        self.worker = AIWorker(self.path_a, self.path_b)
+        for file_path in file_paths:
+            path = Path(file_path)
+            try:
+                # Prevent unnecessary reloading
+                if path not in self.loaded_documents:
+                    df = loader.load_excel(path)
+                    self.loaded_documents[path] = df
+                    self.tab_manager.add_document_tab(df, path)
+            except Exception as e:
+                errors.append(f"{path.name}: {str(e)}")
+
+        if errors:
+            err_msg = "\n".join(errors)
+            QMessageBox.warning(self, "Fout bij inladen",
+                                f"Enkele bestanden konden niet geladen worden:\n{err_msg}")
+
+        self.top_bar.set_status(f"Klaar voor gebruik. ({len(self.loaded_documents)} offertes geladen)")
+
+    def unload_document(self, path: Path):
+        """Called when a user closes a document tab."""
+        if path in self.loaded_documents:
+            del self.loaded_documents[path]
+            self.top_bar.set_status(f"Klaar voor gebruik. ({len(self.loaded_documents)} offertes geladen)")
+
+    def run_comparison(self):
+        if len(self.loaded_documents) < 2:
+            QMessageBox.warning(self, "Geen bestanden", "Laad minstens twee offertes in.")
+            return
+
+        self.top_bar.set_status("Bezig met analyseren... Even geduld.")
+        self.top_bar.set_analyze_enabled(False)
+
+        self.tab_manager.setCurrentWidget(self.tab_manager.comparison_tab)
+
+        # Temporary bridge: Pass the first two documents to the current AIWorker.
+        # When your backend supports N docs, you can just pass the whole dictionary/list!
+        paths = list(self.loaded_documents.keys())
+        self.worker = AIWorker(paths[0], paths[1])
         self.worker.signals.finished.connect(self.on_ai_finished)
         self.worker.signals.error.connect(self.on_ai_error)
         self.worker.start()
 
     def on_ai_finished(self, clusters: list[dict], lookup: dict, unmatched_a: list, unmatched_b: list):
-        self.status_label.setText(f"Analyse voltooid. {len(clusters)} clusters gevonden.")
-        self.run_btn.setEnabled(True)
-
-        # Hand the massive data payload over to the new Tab widget
-        self.comparison_tab.populate_from_ai(clusters, lookup, unmatched_a, unmatched_b)
+        self.top_bar.set_status(f"Analyse voltooid. {len(clusters)} clusters gevonden.")
+        self.top_bar.set_analyze_enabled(True)
+        self.tab_manager.comparison_tab.populate_from_ai(clusters, lookup, unmatched_a, unmatched_b)
 
     def on_ai_error(self, err_msg: str):
-        self.status_label.setText(f"Foutmelding: {err_msg}")
-        self.run_btn.setEnabled(True)
+        self.top_bar.set_status(f"Foutmelding: {err_msg}")
+        self.top_bar.set_analyze_enabled(True)
 
+    def on_comparison_state_changed(self):
+        """Passes data to Preview Tab whenever items move."""
+        paths = list(self.loaded_documents.keys())
+        if len(paths) >= 2:
+            df_a = self.loaded_documents[paths[0]]
+            df_b = self.loaded_documents[paths[1]]
+
+            clusters, unmatched = self.tab_manager.comparison_tab.gather_current_state()
+            self.tab_manager.preview_tab.request_update(clusters, unmatched, df_a, df_b)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
 
-    # FORCING LIGHT MODE
     app.setStyle("Fusion")
     palette = QPalette()
     palette.setColor(QPalette.ColorRole.Window, QColor(240, 240, 240))
