@@ -1,5 +1,7 @@
+from pathlib import Path
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QPushButton, QLabel
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSize
+from PySide6.QtGui import QIcon
 
 from src.UI.ManualMatching.MatchItem import MatchItem
 
@@ -14,12 +16,30 @@ class ProductItem(QWidget):
         self.qty_lbl = QLabel(str(match_item.qty))
         self.unit_lbl = QLabel(match_item.unit if match_item.unit else "-")
 
-        # --- NEW: Eject Button ---
-        self.eject_btn = QPushButton("✕")
+        icon_dir = Path(__file__).parent.parent.parent.parent / "assets"
+        normal_path = (icon_dir / "close.svg").as_posix()
+        hover_path = (icon_dir / "close-hover.svg").as_posix()
+
+        self.eject_btn = QPushButton()
         self.eject_btn.setFixedSize(22, 22)
         self.eject_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.eject_btn.setStyleSheet("background-color: transparent; color: #d32f2f; font-weight: bold; border: none;")
         self.eject_btn.setToolTip("Verwijder uit cluster (Naar Parking Lot)")
+
+        self.eject_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                border: none;
+                /* Use 'image' instead of 'qproperty-icon' to match the Tab look */
+                image: url({normal_path});
+                width: 16px; 
+                height: 16px;
+            }}
+            QPushButton:hover {{
+                background-color: rgba(255, 255, 255, 50); /* Matches your tab highlight */
+                image: url({hover_path});
+                border-radius: 3px;
+            }}
+        """)
 
         if match_item.is_parked:
             # Neutral Styling for Parked Items (Hide Eject Button)

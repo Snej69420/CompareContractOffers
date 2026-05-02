@@ -1,34 +1,48 @@
+from pathlib import Path
 from PySide6.QtWidgets import QPushButton, QMessageBox
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QIcon
 
-from src.UI.ManualMatching.BaseCluster import BaseClusterWidget
+from src.UI.ManualMatching.BaseCluster import BaseCluster
 from src.UI.ManualMatching.MatchItem import MatchItem
 
-class Cluster(BaseClusterWidget):
+class Cluster(BaseCluster):
     itemToParkingLot = Signal(object)
     clusterRemoved = Signal(object, list, list)
 
     def __init__(self, cluster_data: dict, index: int, score_lookup: dict):
-        super().__init__(f"📦 Cluster {index}")
+        super().__init__(f"Cluster {index}")
         self.score_lookup = score_lookup
         self.is_approved = False
         self.cluster_index = index
+
+        icon_dir = Path(__file__).parent.parent.parent.parent / "assets"
+
+        self.open_icon = QIcon(str(icon_dir / "package-open.svg"))
+        self.closed_icon = QIcon(str(icon_dir / "package-closed.svg"))
+        self.approve_icon = QIcon(str(icon_dir / "check.svg"))
+        self.edit_icon = QIcon(str(icon_dir / "pencil.svg"))
+        self.icon_label.setIcon(self.open_icon)
 
         self.setStyleSheet(
             "ClusterWidget { background-color: #f9f9f9; border: 1px solid #ddd; border-radius: 5px; margin: 5px; }")
         self.title_label.setStyleSheet("font-weight: bold; font-size: 14px; color: black;")
 
         # Add specific buttons to the inherited header
-        self.delete_btn = QPushButton("🗑️")
+        self.delete_btn = QPushButton()
+        self.delete_btn.setIcon(QIcon(str(icon_dir / "trash.svg")))
         self.delete_btn.setStyleSheet(
             "background-color: #ffebee; color: #c62828; border: 1px solid #ffcdd2; border-radius: 3px; padding: 5px;")
         self.delete_btn.setToolTip("Cluster verwijderen")
         self.delete_btn.clicked.connect(self.request_removal)
 
-        self.approve_btn = QPushButton("Bevestigen ✓")
-        self.approve_btn.setStyleSheet(
-            "background-color: #d4edda; color: black; border: 1px solid #c3e6cb; border-radius: 3px; padding: 5px;")
+        self.approve_btn = QPushButton("Bevestigen")
+        self.approve_btn.setIcon(self.approve_icon)
+        self.approve_btn.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         self.approve_btn.clicked.connect(self.toggle_approve)
+        self.approve_btn.setStyleSheet(
+            "background-color: #f9f9f9; color: black; border: 1px solid #c3e6cb; border-radius: 3px; padding: 5px;"
+        )
 
         self.header_layout.addWidget(self.delete_btn)
         self.header_layout.addWidget(self.approve_btn)
@@ -154,7 +168,7 @@ class Cluster(BaseClusterWidget):
         else:
             quality = "Laag"
 
-        self.title_label.setText(f"📦 Cluster {self.cluster_index} | Zekerheid: {quality} ({avg_cluster_score:.0%})")
+        self.title_label.setText(f"Cluster {self.cluster_index} | Zekerheid: {quality} ({avg_cluster_score:.0%})")
 
         # --- 5. SORT & REBUILD UI ---
         # Sort the items in memory
@@ -185,12 +199,16 @@ class Cluster(BaseClusterWidget):
         self.is_approved = not self.is_approved
         if self.is_approved:
             self.lists_widget.setVisible(False)
-            self.approve_btn.setText("Aanpassen ✎")
+            self.approve_btn.setText("Aanpassen")
+            self.approve_btn.setIcon(self.edit_icon)
+            self.icon_label.setIcon(self.closed_icon)
             self.setStyleSheet(
                 "ClusterWidget { background-color: #e2f0e5; border: 1px solid #c3e6cb; border-radius: 5px; margin: 5px; }")
         else:
             self.lists_widget.setVisible(True)
-            self.approve_btn.setText("Approve ✓")
+            self.approve_btn.setText("Bevestigen")
+            self.approve_btn.setIcon(self.approve_icon)
+            self.icon_label.setIcon(self.open_icon)
             self.setStyleSheet(
                 "ClusterWidget { background-color: #f9f9f9; border: 1px solid #ddd; border-radius: 5px; margin: 5px; }")
 

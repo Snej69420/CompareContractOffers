@@ -1,8 +1,8 @@
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame
-from PySide6.QtCore import Signal, Qt
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QPushButton
+from PySide6.QtCore import Signal, Qt, QSize
 from src.UI.ManualMatching.DraggableItemList import DraggableItemList
 
-class BaseClusterWidget(QFrame):
+class BaseCluster(QFrame):
     """Base class providing the layout and height logic for both Clusters and the Parking Lot."""
     requestNeighborMove = Signal(object, object, str)
     requestGlobalNavigation = Signal(object, str, str)
@@ -15,6 +15,12 @@ class BaseClusterWidget(QFrame):
 
         # Header Layout (Children can add buttons to this)
         self.header_layout = QHBoxLayout()
+        self.icon_label = QPushButton()
+        self.icon_label.setFlat(True)  # Removes button borders/styling
+        self.icon_label.setEnabled(False)  # Prevents the user from clicking it
+        self.icon_label.setStyleSheet("border: none; background: transparent; padding: 0px;")
+        self.icon_label.setIconSize(QSize(20, 20))
+        self.header_layout.addWidget(self.icon_label)
         self.title_label = QLabel(title_text)
         self.header_layout.addWidget(self.title_label)
         self.header_layout.addStretch()

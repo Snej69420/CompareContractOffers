@@ -41,6 +41,5 @@ class ContractLoader:
         # --- ATTACH METADATA TO DATAFRAME ---
         df.attrs['project'] = str(project_name).strip()
         df.attrs['contractor'] = str(contractor_name).strip()
-        print(f"HMMM: project: {str(project_name)}  contractor: {str(contractor_name)}")
 
         return df
