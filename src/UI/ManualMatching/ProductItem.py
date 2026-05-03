@@ -1,13 +1,15 @@
 from pathlib import Path
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QPushButton, QLabel
 from PySide6.QtCore import Qt, QSize
-from PySide6.QtGui import QIcon
 
 from src.UI.ManualMatching.MatchItem import MatchItem
+from src.UI.Settings import settings
 
 class ProductItem(QWidget):
     def __init__(self, match_item: MatchItem, eject_callback=None):  # Added callback
         super().__init__()
+        self.match_item = match_item
+
         layout = QHBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(6)
@@ -15,6 +17,9 @@ class ProductItem(QWidget):
         self.name_lbl = QLabel(match_item.name)
         self.qty_lbl = QLabel(str(match_item.qty))
         self.unit_lbl = QLabel(match_item.unit if match_item.unit else "-")
+
+        settings.decimalsChanged.connect(self.refresh_numbers)
+        self.refresh_numbers()
 
         icon_dir = Path(__file__).parent.parent.parent.parent / "assets"
         normal_path = (icon_dir / "close.svg").as_posix()
@@ -76,3 +81,15 @@ class ProductItem(QWidget):
             return "#fff9c4"  # Yellow
         else:
             return "#ffcdd2"  # Red
+
+    def refresh_numbers(self):
+        """This runs when the widget is created AND whenever the +/- buttons are clicked."""
+        fmt = f"{{:.{settings.decimals}f}}"
+
+        try:
+            val = float(str(self.match_item.qty).replace(',', '.'))
+            formatted_qty = fmt.format(val)
+        except (ValueError, TypeError):
+            formatted_qty = str(self.match_item.qty)
+
+        self.qty_lbl.setText(formatted_qty)

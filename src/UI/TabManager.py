@@ -5,7 +5,7 @@ from PySide6.QtGui import QIcon, QCursor
 
 from src.UI.DataModel.ComparisonTab import ComparisonTab
 from src.UI.DataModel.PreviewTab import PreviewTab
-from src.UI.DataModel.DocumentTab import DocumentTabWidget
+from src.UI.DataModel.DocumentTab import DocumentTab
 
 
 class MainTabWidget(QTabWidget):
@@ -69,7 +69,7 @@ class MainTabWidget(QTabWidget):
             return
 
 
-        doc_tab = DocumentTabWidget(df, path.name)
+        doc_tab = DocumentTab(df, path.name)
 
         # Insert document tabs at the far left (index 0 or len of current docs)
         insert_idx = len(self.doc_tabs)

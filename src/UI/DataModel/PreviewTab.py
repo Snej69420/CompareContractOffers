@@ -4,7 +4,7 @@ from PySide6.QtCore import Qt, QTimer
 
 from src.UI.DataModel.DataTable import DataTableModel
 from src.UI.DataModel.ReportGenerator import ReportGenerator
-
+from src.UI.DataModel.DynamicTable import DynamicTable
 
 class PreviewTab(QWidget):
     def __init__(self):
@@ -17,11 +17,7 @@ class PreviewTab(QWidget):
         self.layout.addWidget(self.header_label)
 
         # Table Setup
-        self.table = QTableView()
-        self.table.setAlternatingRowColors(True)
-        self.table.setStyleSheet("alternate-background-color: #f9f9f9; background-color: #ffffff;")
-        self.table.setWordWrap(True)
-        self.table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        self.table = DynamicTable()
         self.layout.addWidget(self.table)
 
         # Internal Debouncer
@@ -70,30 +66,33 @@ class PreviewTab(QWidget):
             return
         self._last_fingerprint = fingerprint
 
-        # 1. Extract Metadata Dynamically for N Documents
+        # Extract Metadata
         names = {}
         project_name = "Project Onbekend"
 
         for path, df in self._loaded_documents.items():
             names[path.name] = df.attrs.get('contractor', path.stem)
-            if project_name == "Project Onbekend":  # Just grab the first project name we find
+            if project_name == "Project Onbekend":
                 project_name = df.attrs.get('project', 'Project Onbekend')
 
         self.header_label.setText(f"📁 Project: {project_name}")
 
-        # 2. Generate Data (The legacy bridge is GONE!)
+        # Generate Data
         generator = ReportGenerator(names)
         df_data, df_colors, spans = generator.generate(self._pending_clusters, self._pending_unmatched)
 
-        # 3. Render Table Model
+        # Render Table Model
         model = DataTableModel(df_data, df_colors)
         self.table.setModel(model)
-        self.table.clearSpans()
 
+        # --- 3. Initial Layout & Spans ---
+        # We clear old spans, set initial stretch for the first load, and apply the new spans.
+        self.table.clearSpans()
         header = self.table.horizontalHeader()
         header.setStretchLastSection(False)
         self.table.resizeColumnsToContents()
 
+        # Initial stretch application (ReactiveTableView protects this during settings changes!)
         for i in range(model.columnCount()):
             col_name = str(model.headerData(i, Qt.Orientation.Horizontal)).lower()
             if 'naam' in col_name:
@@ -101,6 +100,7 @@ class PreviewTab(QWidget):
             else:
                 header.setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
 
+        # VITAL: Re-apply the vertical cell merging for the report
         for row_start, row_span, c_name in spans:
             for col_idx in range(model.columnCount()):
                 col_header = str(model.headerData(col_idx, Qt.Orientation.Horizontal))

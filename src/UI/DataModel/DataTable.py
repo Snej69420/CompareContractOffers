@@ -1,7 +1,7 @@
 import pandas as pd
 from PySide6.QtCore import QAbstractTableModel, Qt
 from PySide6.QtGui import QColor
-
+from src.UI.Settings import settings
 
 class DataTableModel(QAbstractTableModel):
     """
@@ -34,34 +34,34 @@ class DataTableModel(QAbstractTableModel):
 
         # --- 1. DISPLAY ROLE (Text & Numbers) ---
         if role == Qt.ItemDataRole.DisplayRole:
-            # Tuples break pd.isna(), so check if it's a tuple first!
             is_tuple = isinstance(value, tuple)
-
-            if not is_tuple and pd.isna(value):
-                return ""
-
             delta_str = ""
+            base_val = value
+
             if is_tuple:
-                value, delta = value
+                base_val, delta = value
                 sign = "+" if delta > 0 else ""
-                delta_fmt = f"{float(delta):.4f}".rstrip('0').rstrip('.').replace('.', ',')
+                delta_fmt = f"{float(delta):.{settings.decimals}f}".replace('.', ',')
                 delta_str = f" ({sign}{delta_fmt})"
 
-            # Smart Belgian Float Formatting
-            if isinstance(value, (float, int)):
-                if value == int(value):
-                    return str(int(value)) + delta_str
-                formatted = f"{float(value):.4f}".rstrip('0').rstrip('.').replace('.', ',')
-                return formatted + delta_str
+            if pd.isna(base_val) or base_val == "":
+                return ""
 
-            return str(value) + delta_str
+            # THE STRING TRAP FIX: Try to cast it to a float just like ProductItem!
+            try:
+                # Convert comma to dot and parse to float
+                float_val = float(str(base_val).replace(',', '.'))
+                formatted = f"{float_val:.{settings.decimals}f}".replace('.', ',')
+                return formatted + delta_str
+            except (ValueError, TypeError):
+                # If it fails (because it's a Name or Unit), just return the text
+                return str(base_val) + delta_str
 
         # --- 2. ALIGNMENT ROLE ---
         if role == Qt.ItemDataRole.TextAlignmentRole:
-            # --- FIXED: Center everything horizontally and vertically ---
             return int(Qt.AlignmentFlag.AlignCenter)
 
-        # --- 3. BACKGROUND ROLE (Highlighting Differences) ---
+        # --- 3. BACKGROUND ROLE ---
         if role == Qt.ItemDataRole.BackgroundRole:
             color_val = self._colors.iloc[row, col]
             if isinstance(color_val, str) and color_val.startswith("#"):

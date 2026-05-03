@@ -1,7 +1,10 @@
 from pathlib import Path
-from PySide6.QtWidgets import QWidget, QHBoxLayout, QPushButton, QLabel
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QPushButton, QLabel, QFrame
 from PySide6.QtGui import QIcon, QCursor
 from PySide6.QtCore import Qt, Signal, QSize
+
+from src.UI.Settings import settings
+
 
 class TopBarControls(QWidget):
     loadRequested = Signal()
@@ -10,7 +13,7 @@ class TopBarControls(QWidget):
     def __init__(self):
         super().__init__()
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 10) # Added slight bottom margin for breathing room
+        layout.setContentsMargins(0, 0, 0, 10)  # Added slight bottom margin for breathing room
 
         icon_dir = Path(__file__).parent.parent.parent / "assets"
 
@@ -19,6 +22,7 @@ class TopBarControls(QWidget):
         self.load_btn.setIcon(QIcon(str(icon_dir / "folder.svg")))
         self.load_btn.setIconSize(QSize(18, 18))
         self.load_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+
         self.load_btn.setStyleSheet("""
             QPushButton {
                 background-color: #ffffff;
@@ -27,7 +31,6 @@ class TopBarControls(QWidget):
                 border-radius: 6px;
                 padding: 8px 16px;
                 font-weight: bold;
-                font-size: 13px;
             }
             QPushButton:hover { background-color: #f5f5f5; border-color: #bbbbbb; }
             QPushButton:pressed { background-color: #ebebeb; }
@@ -36,9 +39,10 @@ class TopBarControls(QWidget):
 
         # --- Start Analysis (primary colour) ---
         self.run_btn = QPushButton(" Start analyse")
-        # self.run_btn.setIcon(QIcon(str(icon_dir / "play.svg")))
         self.run_btn.setIconSize(QSize(18, 18))
         self.run_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+
+        # REMOVED: hardcoded font-size so it obeys the global app settings
         self.run_btn.setStyleSheet("""
             QPushButton {
                 background-color: #007bff;
@@ -47,7 +51,6 @@ class TopBarControls(QWidget):
                 border-radius: 6px;
                 padding: 8px 20px;
                 font-weight: bold;
-                font-size: 13px;
             }
             QPushButton:hover { background-color: #0069d9; }
             QPushButton:pressed { background-color: #0056b3; }
@@ -59,11 +62,73 @@ class TopBarControls(QWidget):
         self.status_label = QLabel("Klaar voor gebruik.")
         self.status_label.setStyleSheet("color: #555555; font-style: italic; margin-left: 10px;")
 
-        # Assemble the layout
+        # Assemble Left Side
         layout.addWidget(self.load_btn)
         layout.addWidget(self.run_btn)
         layout.addWidget(self.status_label)
+
+        # Pushes everything added after this to the far right
         layout.addStretch()
+
+        # ==========================================
+        # --- VIEW CONTROLS (RIGHT SIDE) ---
+        # ==========================================
+
+        # Shared style for the mini +/- buttons
+        mini_btn_style = """
+            QPushButton {
+                background-color: #ffffff;
+                border: 1px solid #cccccc;
+                border-radius: 6px;
+                padding: 7px 10px; 
+            }
+            QPushButton:hover { background-color: #f5f5f5; border-color: #bbbbbb; }
+            QPushButton:pressed { background-color: #ebebeb; }
+        """
+        view_icon_size = QSize(20, 20)
+
+        # --- Font Controls ---
+        btn_font_min = QPushButton()
+        btn_font_min.setIcon(QIcon(str(icon_dir / "decrease-fontsize.svg")))
+        btn_font_min.setIconSize(view_icon_size)
+        btn_font_min.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        btn_font_min.setStyleSheet(mini_btn_style)
+        btn_font_min.clicked.connect(lambda checked=False: settings.adjust_font_size(-1))
+
+        btn_font_plus = QPushButton()
+        btn_font_plus.setIcon(QIcon(str(icon_dir / "increase-fontsize.svg")))
+        btn_font_plus.setIconSize(view_icon_size)
+        btn_font_plus.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        btn_font_plus.setStyleSheet(mini_btn_style)
+        btn_font_plus.clicked.connect(lambda checked=False: settings.adjust_font_size(1))
+
+        layout.addWidget(btn_font_min)
+        layout.addWidget(btn_font_plus)
+
+        # Add a subtle vertical separator line
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.VLine)
+        separator.setFrameShadow(QFrame.Shadow.Sunken)
+        separator.setStyleSheet("color: #ccc; margin: 0px 10px;")
+        layout.addWidget(separator)
+
+        # --- Decimal Controls ---
+        btn_dec_min = QPushButton()
+        btn_dec_min.setIcon(QIcon(str(icon_dir / "decrease-precision.svg")))
+        btn_dec_min.setIconSize(view_icon_size)
+        btn_dec_min.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        btn_dec_min.setStyleSheet(mini_btn_style)
+        btn_dec_min.clicked.connect(lambda checked=False: settings.adjust_decimals(-1))
+
+        btn_dec_plus = QPushButton()
+        btn_dec_plus.setIcon(QIcon(str(icon_dir / "increase-precision.svg")))
+        btn_dec_plus.setIconSize(view_icon_size)
+        btn_dec_plus.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        btn_dec_plus.setStyleSheet(mini_btn_style)
+        btn_dec_plus.clicked.connect(lambda checked=False: settings.adjust_decimals(1))
+
+        layout.addWidget(btn_dec_min)
+        layout.addWidget(btn_dec_plus)
 
     def set_status(self, text: str):
         self.status_label.setText(text)
