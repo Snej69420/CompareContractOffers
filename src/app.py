@@ -1,6 +1,5 @@
 import sys
 from pathlib import Path
-import pandas as pd
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -17,9 +16,7 @@ from src.Compare.loader import ContractLoader
 from src.UI.Controls import TopBarControls
 from src.UI.TabManager import MainTabWidget
 
-from src.UI.DataModel.DocumentTab import DocumentTabWidget
-from src.UI.DataModel.ComparisonTab import ComparisonTab
-from src.UI.DataModel.PreviewTab import PreviewTab
+from src.UI.Settings import settings
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -133,6 +130,15 @@ class MainWindow(QMainWindow):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+
+    def update_global_font(new_size):
+        # Grab the current global font, change its size, and reapply it
+        global_font = app.font()
+        global_font.setPointSize(new_size)
+        app.setFont(global_font)
+    settings.fontSizeChanged.connect(update_global_font)
+
+    update_global_font(settings.font_size)
 
     app.setStyle("Fusion")
     palette = QPalette()
