@@ -1,11 +1,15 @@
+from pathlib import Path
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QPushButton, QLabel
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSize
 
 from src.UI.ManualMatching.MatchItem import MatchItem
+from src.UI.Settings import settings
 
 class ProductItem(QWidget):
     def __init__(self, match_item: MatchItem, eject_callback=None):  # Added callback
         super().__init__()
+        self.match_item = match_item
+
         layout = QHBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(6)
@@ -14,12 +18,33 @@ class ProductItem(QWidget):
         self.qty_lbl = QLabel(str(match_item.qty))
         self.unit_lbl = QLabel(match_item.unit if match_item.unit else "-")
 
-        # --- NEW: Eject Button ---
-        self.eject_btn = QPushButton("✕")
+        settings.decimalsChanged.connect(self.refresh_numbers)
+        self.refresh_numbers()
+
+        icon_dir = Path(__file__).parent.parent.parent.parent / "assets"
+        normal_path = (icon_dir / "close.svg").as_posix()
+        hover_path = (icon_dir / "close-hover.svg").as_posix()
+
+        self.eject_btn = QPushButton()
         self.eject_btn.setFixedSize(22, 22)
         self.eject_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.eject_btn.setStyleSheet("background-color: transparent; color: #d32f2f; font-weight: bold; border: none;")
         self.eject_btn.setToolTip("Verwijder uit cluster (Naar Parking Lot)")
+
+        self.eject_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                border: none;
+                /* Use 'image' instead of 'qproperty-icon' to match the Tab look */
+                image: url({normal_path});
+                width: 16px; 
+                height: 16px;
+            }}
+            QPushButton:hover {{
+                background-color: rgba(255, 255, 255, 50); /* Matches your tab highlight */
+                image: url({hover_path});
+                border-radius: 3px;
+            }}
+        """)
 
         if match_item.is_parked:
             # Neutral Styling for Parked Items (Hide Eject Button)
@@ -56,3 +81,15 @@ class ProductItem(QWidget):
             return "#fff9c4"  # Yellow
         else:
             return "#ffcdd2"  # Red
+
+    def refresh_numbers(self):
+        """This runs when the widget is created AND whenever the +/- buttons are clicked."""
+        fmt = f"{{:.{settings.decimals}f}}"
+
+        try:
+            val = float(str(self.match_item.qty).replace(',', '.'))
+            formatted_qty = fmt.format(val)
+        except (ValueError, TypeError):
+            formatted_qty = str(self.match_item.qty)
+
+        self.qty_lbl.setText(formatted_qty)
