@@ -88,17 +88,6 @@ class PreviewTab(QWidget):
         # --- 3. Initial Layout & Spans ---
         # We clear old spans, set initial stretch for the first load, and apply the new spans.
         self.table.clearSpans()
-        header = self.table.horizontalHeader()
-        header.setStretchLastSection(False)
-        self.table.resizeColumnsToContents()
-
-        # Initial stretch application (ReactiveTableView protects this during settings changes!)
-        for i in range(model.columnCount()):
-            col_name = str(model.headerData(i, Qt.Orientation.Horizontal)).lower()
-            if 'naam' in col_name:
-                header.setSectionResizeMode(i, QHeaderView.ResizeMode.Stretch)
-            else:
-                header.setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
 
         # VITAL: Re-apply the vertical cell merging for the report
         for row_start, row_span, c_name in spans:

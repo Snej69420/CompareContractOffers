@@ -7,7 +7,7 @@ class AppSettings(QObject):
 
     def __init__(self):
         super().__init__()
-        self.font_size = 14
+        self.font_size = 12
         self.decimals = 2
 
     def adjust_font_size(self, delta: int):
