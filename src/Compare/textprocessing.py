@@ -5,7 +5,10 @@ import pandas as pd
 from nltk.stem.snowball import SnowballStemmer
 
 class TextNormalizer:
-    """Handles deep NLP cleaning, stemming, and unit standardization."""
+    """
+    Handles deep NLP cleaning, stemming, and unit standardization.
+    Strips action verbs (leveren, plaatsen) to prevent BM25 score inflation.
+    """
 
     UNIT_MAP = {
         'm2': 'm²', 'vkm': 'm²', 'sqm': 'm²', 'm²': 'm²',
@@ -34,48 +37,97 @@ class TextNormalizer:
     @staticmethod
     def extract_dimensions(text: str) -> set[tuple[float, str]]:
         """
-        Finds explicit measurements like '142 mm', '2,6mm', 'Ø 100'.
-        Returns a set of tuples, e.g., {(142.0, 'mm'), (2.6, 'mm')}
+        Extracts measurements.
+        Dual-Regex: Catches prefix (Ø 40) AND suffix (40mm).
+        Normalizes all length units (cm, Ø, dia) to 'mm' for unified baseline.
         """
         if pd.isna(text):
             return set()
 
         text = str(text).lower()
-        dimensions = set()
+        raw_dimensions = set()
 
-        # Regex explanation:
-        # (\d+(?:[.,]\d+)?) catches numbers like 142, 2.6, or 2,6
-        # \s* catches optional spaces
-        # (mm|cm|ø|diameter) catches the dimension unit
-        pattern = r'(?:ø|diameter\s*)?(\d+(?:[.,]\d+)?)\s*(mm|cm|ø)'
+        # Suffix catch (e.g., "142mm", "2,6 cm", "100 dia")
+        suffix_pattern = r'(\d+(?:[.,]\d+)?)\s*(mm|cm|ø|dia|diameter)'
+        for val, raw_unit in re.findall(suffix_pattern, text):
+            raw_dimensions.add((val, raw_unit))
 
-        matches = re.findall(pattern, text)
-        for val, unit in matches:
-            # Clean comma decimals to dots for Python floats
-            clean_val = float(val.replace(',', '.'))
-            dimensions.add((clean_val, unit))
+        # Prefix catch (e.g., "Ø 40", "dia 100")
+        prefix_pattern = r'(ø|diameter|dia)\s*(\d+(?:[.,]\d+)?)'
+        for raw_unit, val in re.findall(prefix_pattern, text):
+            raw_dimensions.add((val, raw_unit))
 
-        return dimensions
+        cleaned_dims = set()
+        for val_str, raw_unit in raw_dimensions:
+            clean_val = float(val_str.replace(',', '.'))
+            u = raw_unit.strip()
+
+            # Normalize to mm
+            if u == 'cm':
+                clean_val *= 10.0
+                u = 'mm'
+            elif u in ['ø', 'dia', 'diameter']:
+                u = 'mm'
+
+            cleaned_dims.add((clean_val, u))
+
+        return cleaned_dims
 
     @staticmethod
     def check_dimension_clash(dims_a: set[tuple[float, str]], dims_b: set[tuple[float, str]]) -> bool:
         """
-        Returns True if the items have conflicting physical dimensions.
+        Checks for numeric clashes.
+        Magnitude Classification: Prevents 'Thickness' (<10mm) clashing with 'Width' (>10mm).
+        E.g., Stops 1.5mm aluminum plate from destroying match with 50mm profile.
         """
         if not dims_a or not dims_b:
-            return False  # Not enough info to force a clash
+            return False
 
-        # If they share the exact same dimension (e.g., both are 100mm), no clash
         if dims_a.intersection(dims_b):
             return False
 
-        # If they use the same unit (e.g., both use 'mm') but the values didn't match, it's a clash!
         units_a = {u for v, u in dims_a}
         units_b = {u for v, u in dims_b}
         shared_units = units_a.intersection(units_b)
 
-        if shared_units:
-            return True
+        if not shared_units:
+            return False
+
+        for unit in shared_units:
+            vals_a = [v for v, u in dims_a if u == unit]
+            vals_b = [v for v, u in dims_b if u == unit]
+
+            # Separate into Large (>10) and Small (<10)
+            a_large = [v for v in vals_a if v >= 10.0]
+            a_small = [v for v in vals_a if v < 10.0]
+            b_large = [v for v in vals_b if v >= 10.0]
+            b_small = [v for v in vals_b if v < 10.0]
+
+            # Compare Large vs Large
+            if a_large and b_large:
+                has_close = False
+                for va in a_large:
+                    for vb in b_large:
+                        # Tolerance: 30mm or 25% (Allows standard pipe jumps 75->100)
+                        tolerance = max(30.0, 0.25 * max(va, vb))
+                        if abs(va - vb) <= tolerance:
+                            has_close = True
+                            break
+                    if has_close: break
+                if not has_close: return True # CLASH
+
+            # Compare Small vs Small
+            if a_small and b_small:
+                has_close = False
+                for va in a_small:
+                    for vb in b_small:
+                        # Tolerance: 1.0mm or 15% (Strict on sheet metal / foil)
+                        tolerance = max(1.0, 0.15 * max(va, vb))
+                        if abs(va - vb) <= tolerance:
+                            has_close = True
+                            break
+                    if has_close: break
+                if not has_close: return True # CLASH
 
         return False
 
