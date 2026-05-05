@@ -91,29 +91,20 @@ class MainWindow(QMainWindow):
 
         self.tab_manager.setCurrentWidget(self.tab_manager.comparison_tab)
 
-        # Temporary bridge: Pass the first two documents to the current AIWorker.
-        # When your backend supports N docs, you can just pass the whole dictionary/list!
-        paths = list(self.loaded_documents.keys())
-        self.worker = AIWorker(paths[0], paths[1])
+        # Pass the entire N-document dictionary directly to the worker!
+        self.worker = AIWorker(self.loaded_documents)
         self.worker.signals.finished.connect(self.on_ai_finished)
         self.worker.signals.error.connect(self.on_ai_error)
         self.worker.start()
 
-    def on_ai_finished(self, clusters: list[dict], lookup: dict, unmatched_a: list, unmatched_b: list):
+    def on_ai_finished(self, clusters: list[dict], lookup: dict, unmatched_dict: dict):
         self.top_bar.set_status(f"Analyse voltooid. {len(clusters)} clusters gevonden.")
         self.top_bar.set_analyze_enabled(True)
 
-        # 1. Grab the keys for the two currently processed documents
-        paths = list(self.loaded_documents.keys())
-        doc_keys = [paths[0].name, paths[1].name]
+        # 1. Extract dynamic document names straight from the dictionary keys
+        doc_keys = list(unmatched_dict.keys())
 
-        # 2. Package the unmatched lists into the new generalized dictionary
-        unmatched_dict = {
-            doc_keys[0]: unmatched_a,
-            doc_keys[1]: unmatched_b
-        }
-
-        # 3. Pass all arguments in the exact correct order!
+        # 2. Pass them to the N-document generalized ComparisonTab
         self.tab_manager.comparison_tab.populate_from_ai(doc_keys, clusters, lookup, unmatched_dict)
 
     def on_ai_error(self, err_msg: str):

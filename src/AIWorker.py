@@ -1,12 +1,12 @@
 from pathlib import Path
+import pandas as pd
 from PySide6.QtCore import QThread, Signal, QObject
 
-from src.Compare.loader import ContractLoader
 from src.Compare.scoring import ScoringEngine
 
 
 class WorkerSignals(QObject):
-    finished = Signal(object, object, object, object)
+    finished = Signal(object, object, object)
     error = Signal(str)
 
 
@@ -16,10 +16,9 @@ class AIWorker(QThread):
     blocking the main GUI event loop.
     """
 
-    def __init__(self, path_a: Path | str, path_b: Path | str, parent: QObject | None = None):
+    def __init__(self, documents: dict[Path, pd.DataFrame], parent: QObject | None = None):
         super().__init__(parent)
-        self.path_a = path_a
-        self.path_b = path_b
+        self.documents = documents
         self.signals = WorkerSignals()
 
     def run(self) -> None:
@@ -28,20 +27,19 @@ class AIWorker(QThread):
         This method runs in a separate thread.
         """
         try:
-            loader = ContractLoader()
-            # Loading data from paths
-            contract_a = loader.load_excel(self.path_a)
-            contract_b = loader.load_excel(self.path_b)
+            # 1. Convert dictionary keys from Path to string (e.g. "DeCock.xlsx")
+            string_keyed_docs = {path.name: df for path, df in self.documents.items()}
 
-            # Initializing the scoring engine[cite: 1]
-            matcher = ScoringEngine(threshold=0.4)
+            # 2. Initialize the engine with the exact threshold we tuned
+            matcher = ScoringEngine(threshold=0.40)
 
-            # Retrieving the updated tuple from match()[cite: 1]
-            clusters, lookup, unmatched_a, unmatched_b = matcher.match(contract_a, contract_b)
+            # 3. Run the N-Document matching
+            clusters, lookup, unmatched_dict = matcher.match(string_keyed_docs)
 
-            # Emit results safely back to the main thread[cite: 1]
-            self.signals.finished.emit(clusters, lookup, unmatched_a, unmatched_b)
-
+            # 4. Emit the dynamic results safely back to the main thread
+            self.signals.finished.emit(clusters, lookup, unmatched_dict)
         except Exception as e:
-            # Emit the exception string to be handled by the UI[cite: 1]
+            import traceback
+            traceback.print_exc()
+            # Emit the exception string to be handled by the UI
             self.signals.error.emit(str(e))
