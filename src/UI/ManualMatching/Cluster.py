@@ -130,50 +130,57 @@ class Cluster(BaseCluster):
             for item in items:
                 totals[key][item.unit] = totals[key].get(item.unit, 0.0) + item.qty
 
-        avg_cluster_score = 0.0
+        cluster_total_score = 0.0
+        total_scored_items = 0
 
-        # --- 2. TEMPORARY 2-DOCUMENT MATH BRIDGE ---
-        # Until the AI backend is upgraded, scoring only works perfectly between the first 2 docs
-        if len(self.doc_keys) >= 2:
-            key_a, key_b = self.doc_keys[0], self.doc_keys[1]
-            items_a, items_b = items_by_doc[key_a], items_by_doc[key_b]
-
-            cluster_total_score = 0.0
-            total_pairs = 0
-
-            # CALCULATE A ITEMS
+        # --- 2. N-DOCUMENT MATH EVALUATION ---
+        for i, key_a in enumerate(self.doc_keys):
+            items_a = items_by_doc[key_a]
             for a_item in items_a:
                 best_score = 0.0
                 best_name = ""
-                for b_item in items_b:
-                    score = self.score_lookup.get((a_item.original_id, b_item.original_id), 0.0)
-                    cluster_total_score += score
-                    total_pairs += 1
-                    if score >= best_score:
-                        best_score, best_name = score, b_item.name
+
+                # A. Compare against all OTHER documents to find the highest score
+                for j, key_b in enumerate(self.doc_keys):
+                    if i == j: continue
+                    for b_item in items_by_doc[key_b]:
+                        # Check both directions in the lookup dictionary just in case
+                        score = self.score_lookup.get((a_item.original_id, b_item.original_id), 0.0)
+                        if score == 0.0:
+                            score = self.score_lookup.get((b_item.original_id, a_item.original_id), 0.0)
+
+                        if score >= best_score:
+                            best_score, best_name = score, b_item.name
 
                 a_item.current_score = best_score
-                a_item.best_match_name = best_name if items_b else ""
-                a_item.is_unit_matched = a_item.unit in totals[key_b]
-                a_item.is_qty_balanced = abs(
-                    totals[key_a].get(a_item.unit, 0.0) - totals[key_b].get(a_item.unit, 0.0)) < 0.01
+                a_item.best_match_name = best_name
 
-            # CALCULATE B ITEMS
-            for b_item in items_b:
-                best_score = 0.0
-                best_name = ""
-                for a_item in items_a:
-                    score = self.score_lookup.get((a_item.original_id, b_item.original_id), 0.0)
-                    if score >= best_score:
-                        best_score, best_name = score, a_item.name
+                cluster_total_score += best_score
+                total_scored_items += 1
 
-                b_item.current_score = best_score
-                b_item.best_match_name = best_name if items_a else ""
-                b_item.is_unit_matched = b_item.unit in totals[key_a]
-                b_item.is_qty_balanced = abs(
-                    totals[key_b].get(b_item.unit, 0.0) - totals[key_a].get(b_item.unit, 0.0)) < 0.01
+                # B. Check if unit is matched in ANY other document in this cluster
+                other_units = set()
+                for j, key_b in enumerate(self.doc_keys):
+                    if i == j: continue
+                    other_units.update(totals[key_b].keys())
 
-            avg_cluster_score = (cluster_total_score / total_pairs) if total_pairs > 0 else 0.0
+                a_item.is_unit_matched = a_item.unit in other_units
+
+                # C. Check if quantity balances against the MAX total of the other documents
+                a_qty = totals[key_a].get(a_item.unit, 0.0)
+                max_other_qty = 0.0
+                for j, key_b in enumerate(self.doc_keys):
+                    if i == j: continue
+                    other_qty = totals[key_b].get(a_item.unit, 0.0)
+                    if other_qty > max_other_qty:
+                        max_other_qty = other_qty
+
+                if max_other_qty > 0:
+                    a_item.is_qty_balanced = (abs(a_qty - max_other_qty) / max_other_qty) < 0.02
+                else:
+                    a_item.is_qty_balanced = (a_qty == 0.0)
+
+        avg_cluster_score = (cluster_total_score / total_scored_items) if total_scored_items > 0 else 0.0
 
         # --- 3. UPDATE TITLE ---
         if avg_cluster_score >= 0.70:

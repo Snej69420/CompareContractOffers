@@ -27,16 +27,16 @@ class AIWorker(QThread):
         This method runs in a separate thread.
         """
         try:
-            # 1. Convert dictionary keys from Path to string (e.g. "DeCock.xlsx")
+            #  Convert dictionary keys from Path to string (e.g. "DeCock.xlsx")
             string_keyed_docs = {path.name: df for path, df in self.documents.items()}
 
-            # 2. Initialize the engine with the exact threshold we tuned
+            #  Initialize the engine with the exact threshold we tuned
             matcher = ScoringEngine(threshold=0.40)
 
-            # 3. Run the N-Document matching
+            #  Run the N-Document matching
             clusters, lookup, unmatched_dict = matcher.match(string_keyed_docs)
 
-            # 4. Emit the dynamic results safely back to the main thread
+            #  Emit the dynamic results safely back to the main thread
             self.signals.finished.emit(clusters, lookup, unmatched_dict)
         except Exception as e:
             import traceback

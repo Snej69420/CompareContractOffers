@@ -1,5 +1,6 @@
+import math
 from pathlib import Path
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QPushButton, QMessageBox
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QPushButton, QLabel
 from PySide6.QtCore import Qt, Signal, QTimer, QPoint
 from PySide6.QtGui import QIcon, QShortcut, QKeySequence
 
@@ -9,8 +10,44 @@ from src.UI.ManualMatching.MatchItem import MatchItem
 from src.UI.DataModel.Shortcut import ShortcutDialog
 
 
+# --- 1. THE CUSTOM SNAP SCROLL AREA ---
+class PagedScrollArea(QScrollArea):
+    """A custom scroll area that waits for the user to stop scrolling, then mathematically snaps to the nearest column."""
+
+    def __init__(self):
+        super().__init__()
+        self.setWidgetResizable(True)
+        self.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        self.snap_step = 400
+
+        # Debounce timer to wait for trackpad/mouse wheel to stop
+        self.snap_timer = QTimer()
+        self.snap_timer.setSingleShot(True)
+        self.snap_timer.timeout.connect(self.snap_to_column)
+        self.horizontalScrollBar().valueChanged.connect(self.on_scroll)
+
+    def on_scroll(self):
+        # Start a 250ms countdown every time the scrollbar moves.
+        h_bar = self.horizontalScrollBar()
+        if 0 < h_bar.value() < h_bar.maximum():
+            self.snap_timer.start(250)
+
+    def snap_to_column(self):
+        if self.snap_step <= 0: return
+        h_bar = self.horizontalScrollBar()
+        current_val = h_bar.value()
+
+        # Find nearest exact column index
+        target_val = round(current_val / self.snap_step) * self.snap_step
+
+        # Clamp the value so we don't try to snap past the end of the scroll area
+        target_val = max(0, min(target_val, h_bar.maximum()))
+
+        if abs(current_val - target_val) > 2:
+            h_bar.setValue(target_val)
+
+
 class ComparisonTab(QWidget):
-    # Emitted whenever items are moved, dropped, or deleted.
     stateChanged = Signal()
 
     def __init__(self):
@@ -18,90 +55,148 @@ class ComparisonTab(QWidget):
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
 
-        # --- NEW: Top Header Bar for the Info Button ---
-        self.top_bar_layout = QHBoxLayout()
-        self.top_bar_layout.setContentsMargins(0, 10, 20, 5)
+        self.header_row_layout = QHBoxLayout()
+        self.header_row_layout.setContentsMargins(0, 5, 20, 0)
 
+        # The Sticky Header Scroll Area
+        self.header_scroll = QScrollArea()
+        self.header_scroll.setWidgetResizable(True)
+        self.header_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.header_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.header_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        self.header_scroll.setFixedHeight(45)
+
+        self.column_headers_container = QWidget()
+        self.column_headers_layout = QHBoxLayout(self.column_headers_container)
+        self.column_headers_layout.setContentsMargins(25, 0, 25, 0)
+        self.header_scroll.setWidget(self.column_headers_container)
+
+        # The Info Button
         self.info_btn = QPushButton()
-        # Ensure you have an info.svg in your assets folder!
         icon_dir = Path(__file__).parent.parent.parent.parent / "assets"
         self.info_btn.setIcon(QIcon(str(icon_dir / "info.svg")))
         self.info_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.info_btn.setToolTip("Bekijk sneltoetsen")
         self.info_btn.setStyleSheet("""
-            QPushButton {
-                background-color: transparent;
-                border: none;
-                border-radius: 12px;
-                padding: 4px;
-            }
-            QPushButton:hover {
-                background-color: #e0e0e0;
-            }
+            QPushButton { background-color: transparent; border: none; border-radius: 12px; padding: 4px; }
+            QPushButton:hover { background-color: #e0e0e0; }
         """)
         self.info_btn.clicked.connect(self.show_shortcuts_info)
 
-        # Push the button to the right side
-        self.top_bar_layout.addStretch()
-        self.top_bar_layout.addWidget(self.info_btn)
+        # Mount Header Row
+        self.header_row_layout.addWidget(self.header_scroll, stretch=1)
+        self.header_row_layout.addWidget(self.info_btn, alignment=Qt.AlignmentFlag.AlignBottom)
+        self.layout.addLayout(self.header_row_layout)
 
-        self.layout.addLayout(self.top_bar_layout)
-        # -----------------------------------------------
-
-        self.scroll_area = QScrollArea()
-        self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setStyleSheet("QScrollArea { border: none; }")
+        # The Main Workspace (Using our Custom Snap Area!)
+        self.scroll_area = PagedScrollArea()
         self.cluster_container = QWidget()
         self.cluster_layout = QVBoxLayout(self.cluster_container)
         self.cluster_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.cluster_layout.setContentsMargins(25, 0, 25, 0)
         self.scroll_area.setWidget(self.cluster_container)
-
         self.layout.addWidget(self.scroll_area)
+
+        # Link Header to Scroll Area
+        self.scroll_area.horizontalScrollBar().valueChanged.connect(
+            self.header_scroll.horizontalScrollBar().setValue
+        )
+
+        self.add_cluster_btn = QPushButton("Nieuwe cluster toevoegen")
+        self.add_cluster_btn.setStyleSheet(
+            "background-color: #007bff; color: white; font-weight: bold; border-radius: 5px; padding: 10px; margin: 10px 25px;"
+        )
+        self.add_cluster_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.add_cluster_btn.clicked.connect(self.create_cluster)
+        self.layout.addWidget(self.add_cluster_btn)
 
         # State Variables
         self.global_score_lookup = {}
         self.cluster_count = 0
         self.parking_lot = None
         self.add_cluster_btn = None
-
-        self.doc_keys:list[str] = []
+        self.doc_keys: list[str] = []
 
         self.new_cluster_shortcut = QShortcut(QKeySequence("Ctrl+N"), self)
         self.new_cluster_shortcut.activated.connect(self.create_cluster)
+
+    # --- 2. THE MATHEMATICAL RESIZER ---
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        QTimer.singleShot(50, self.recalculate_column_widths)
+
+
+    def recalculate_column_widths(self):
+        if not self.doc_keys: return
+
+        viewport_width = self.scroll_area.viewport().width()
+
+        # Update Dead Space to match layout margins.
+        # header_row_layout has (25 left + 5 right) = 50px
+        actual_layout_margins = 50
+
+        # You may need a tiny buffer for standard Qt layout borders, but 70 was too much.
+        safe_dead_space = actual_layout_margins + 2
+        spacing = 10
+        min_col_width = 330
+
+        available_for_lists = viewport_width - safe_dead_space
+
+        visible_cols = max(1, available_for_lists // min_col_width)
+        visible_cols = min(visible_cols, len(self.doc_keys))
+
+        total_gaps = (visible_cols - 1) * spacing
+
+        # Use math.ceil instead of int()
+        # This ensures we push the fraction OFF-screen rather than pulling the next ON-screen.
+        exact_col_width = math.ceil((available_for_lists - total_gaps) / visible_cols)
+
+        snap_step = exact_col_width + spacing
+        self.scroll_area.snap_step = snap_step
+        self.scroll_area.horizontalScrollBar().setSingleStep(snap_step)
+
+        # Headers
+        self.column_headers_layout.setSpacing(spacing)
+        for i in range(self.column_headers_layout.count()):
+            widget = self.column_headers_layout.itemAt(i).widget()
+            if widget: widget.setFixedWidth(exact_col_width)
+
+        # Lists
+        for i in range(self.cluster_layout.count()):
+            widget = self.cluster_layout.itemAt(i).widget()
+            if hasattr(widget, 'lists'):
+                for lst in widget.lists.values():
+                    lst.setFixedWidth(exact_col_width)
 
     def show_shortcuts_info(self):
         dialog = ShortcutDialog(self)
         dialog.exec()
 
     def populate_from_ai(self, doc_keys: list[str], clusters: list[dict], lookup: dict, unmatched_dict: dict):
-        """Builds the entire UI based on the AI output."""
         self.doc_keys = doc_keys
         self.global_score_lookup = lookup
         self.cluster_count = 0
 
-        # Clear existing clusters cleanly
+        while self.column_headers_layout.count():
+            item = self.column_headers_layout.takeAt(0)
+            if item.widget(): item.widget().deleteLater()
+
+        for key in self.doc_keys:
+            lbl = QLabel(key)
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl.setStyleSheet("font-weight: bold; font-size: 14px; padding: 6px; background-color: #d1d9e6; border-radius: 4px; color: #333;")
+            self.column_headers_layout.addWidget(lbl)
+
         for i in reversed(range(self.cluster_layout.count())):
             widget = self.cluster_layout.itemAt(i).widget()
-            if widget:
-                widget.setParent(None)
+            if widget: widget.setParent(None)
 
-        self.add_cluster_btn = None
         self.parking_lot = None
-
         clusters.sort(key=lambda x: x.get('cluster_score', 0.0), reverse=True)
 
-        # 1. Render AI Clusters
         for cluster_data in clusters:
             self.cluster_count += 1
             self.auto_create_cluster(cluster_data, self.cluster_count)
-
-        # 2. Add Centralized "New Cluster" Button
-        self.add_cluster_btn = QPushButton("Nieuwe cluster toevoegen")
-        self.add_cluster_btn.setStyleSheet(
-            "background-color: #007bff; color: white; font-weight: bold; border-radius: 5px; padding: 10px; margin: 10px 50px;")
-        self.add_cluster_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.add_cluster_btn.clicked.connect(self.create_cluster)
-        self.cluster_layout.addWidget(self.add_cluster_btn)
 
         self.parking_lot = Unmatched(self.doc_keys, unmatched_dict)
         self.cluster_layout.addWidget(self.parking_lot)
@@ -109,16 +204,14 @@ class ComparisonTab(QWidget):
         self.parking_lot.requestNeighborMove.connect(self.handle_neighbor_move)
         self.parking_lot.requestGlobalNavigation.connect(self.handle_global_navigation)
 
-        # Dynamically bind signals for N lists
         for key, lst in self.parking_lot.lists.items():
-            lst.currentItemChanged.connect(
-                lambda current, previous, lw=lst: self.auto_scroll_to_item(lw, current)
-            )
+            lst.currentItemChanged.connect(lambda current, previous, lw=lst: self.auto_scroll_to_item(lw, current))
             lst.itemDropped.connect(self.stateChanged.emit)
             lst.itemEjected.connect(lambda _: self.stateChanged.emit())
 
         self.parking_lot.update_parking_lot()
         self.stateChanged.emit()
+        QTimer.singleShot(100, self.recalculate_column_widths)
 
     def auto_create_cluster(self, cluster_data: dict, index: int):
         widget = Cluster(self.doc_keys, cluster_data, index, self.global_score_lookup)
@@ -128,14 +221,13 @@ class ComparisonTab(QWidget):
         widget.requestGlobalNavigation.connect(self.handle_global_navigation)
 
         for key, lst in widget.lists.items():
-            lst.currentItemChanged.connect(
-                lambda current, previous, lw=lst: self.auto_scroll_to_item(lw, current)
-            )
+            lst.currentItemChanged.connect(lambda current, previous, lw=lst: self.auto_scroll_to_item(lw, current))
             lst.itemDropped.connect(self.stateChanged.emit)
             lst.itemEjected.connect(lambda _: self.stateChanged.emit())
 
-        if self.add_cluster_btn:
-            idx = self.cluster_layout.indexOf(self.add_cluster_btn)
+        # Clean routing: Just inject it right above the parking lot
+        if self.parking_lot:
+            idx = self.cluster_layout.indexOf(self.parking_lot)
             self.cluster_layout.insertWidget(idx, widget)
         else:
             self.cluster_layout.addWidget(widget)
@@ -152,40 +244,32 @@ class ComparisonTab(QWidget):
         if all_items:
             self.parking_lot.receive_items(all_items)
 
-        # --- 1. UX FEATURE: Remember Focus State ---
-        # Find out which specific column the user was actively focused on
         active_key = self.doc_keys[0] if self.doc_keys else None
         for key, lst in widget.lists.items():
             if lst.hasFocus():
                 active_key = key
                 break
 
-        # --- 2. Find the Neighboring Cluster ---
         idx = self.cluster_layout.indexOf(widget)
-        # Default to the cluster above it. If it's the top cluster, try the one below it.
         target_idx = idx - 1 if idx > 0 else idx + 1
 
         target_widget = None
         if 0 <= target_idx < self.cluster_layout.count():
             target_widget = self.cluster_layout.itemAt(target_idx).widget()
-
-            # If the neighbor happens to be the "New Cluster" button, skip over it!
-            if isinstance(target_widget, QPushButton):
-                target_idx = target_idx + 1 if idx == 0 else target_idx - 1
+            # If it hits the parking lot, reverse direction to focus on a cluster
+            if target_widget == self.parking_lot:
+                target_idx = idx - 1
                 if 0 <= target_idx < self.cluster_layout.count():
                     target_widget = self.cluster_layout.itemAt(target_idx).widget()
 
-        # --- 3. Destroy the Widget ---
         widget.deleteLater()
         self.cluster_layout.removeWidget(widget)
         self.stateChanged.emit()
 
-        # --- 4. Apply Focus to the Neighbor ---
         if target_widget and hasattr(target_widget, 'lists') and active_key:
             target_list = target_widget.lists.get(active_key)
             if target_list:
                 target_list.setFocus()
-                # Select the first item in the neighbor so they can keep typing immediately
                 if target_list.count() > 0:
                     target_list.setCurrentRow(0)
 

@@ -1,5 +1,5 @@
 from pathlib import Path
-from PySide6.QtWidgets import QWidget, QHBoxLayout, QPushButton, QLabel
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QPushButton, QLabel, QSizePolicy
 from PySide6.QtCore import Qt, QSize
 
 from src.UI.ManualMatching.MatchItem import MatchItem
@@ -15,8 +15,14 @@ class ProductItem(QWidget):
         layout.setSpacing(6)
 
         self.name_lbl = QLabel(match_item.name)
+        self.name_lbl.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.name_lbl.setMinimumWidth(30)
+
         self.qty_lbl = QLabel(str(match_item.qty))
+        self.qty_lbl.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Preferred)
+
         self.unit_lbl = QLabel(match_item.unit if match_item.unit else "-")
+        self.unit_lbl.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Preferred)
 
         settings.decimalsChanged.connect(self.refresh_numbers)
         self.refresh_numbers()

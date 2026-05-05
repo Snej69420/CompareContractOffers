@@ -313,6 +313,7 @@ class ScoringEngine:
 
                 item_dict = {
                     "id": item.local_idx,
+                    "global_id": item.global_id,
                     "unit": TextNormalizer.normalize_unit(item.row_data.get('Eenheid', '')),
                     **item.row_data.to_dict()
                 }

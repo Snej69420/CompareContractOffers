@@ -7,7 +7,7 @@ class MatchItem:
         if pd.isna(name) or str(name).strip() == "":
             self.name = "Onbekend"
         else:
-            self.name = str(name)
+            self.name = str(name).replace('\n', ' ').replace('\r', ' ').strip()
 
         # Clean quantities and units
         try:
@@ -17,8 +17,8 @@ class MatchItem:
 
         self.unit = raw_data.get('unit', '')
 
-        self.original_id = original_id
-        self.doc_key = doc_key  # NEW: Tracks which document this belongs to
+        self.original_id = raw_data.get('global_id', original_id)
+        self.doc_key = doc_key
         self.current_score = 0.0
         self.best_match_name = ""
 

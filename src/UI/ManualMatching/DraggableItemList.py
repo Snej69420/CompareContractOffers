@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import QListWidget, QListWidgetItem
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QSize
 
 from src.UI.ManualMatching.MatchItem import MatchItem
 from src.UI.ManualMatching.ProductItem import ProductItem
@@ -8,7 +8,7 @@ class DraggableItemList(QListWidget):
     itemDropped = Signal()
     itemEjected = Signal(object)
     moveToNeighbor = Signal(object, str)
-    navigateBoundary = Signal(str, str)  # side ('A' or 'B'), direction ('up', 'down', 'left', 'right')
+    navigateBoundary = Signal(str, str)  # contract id, direction ('up', 'down', 'left', 'right')
 
     def __init__(self, doc_key: str, all_keys: list[str]):
         super().__init__()
@@ -18,6 +18,9 @@ class DraggableItemList(QListWidget):
         self.setDragDropMode(QListWidget.DragDropMode.DragDrop)
         self.setDefaultDropAction(Qt.DropAction.MoveAction)
         self.setAcceptDrops(True)
+        # self.setMinimumWidth(480)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setResizeMode(QListWidget.ResizeMode.Adjust)
         self.setStyleSheet("QListWidget { background-color: white; border: 1px solid #ccc; }")
 
     def dragEnterEvent(self, event):
@@ -35,7 +38,7 @@ class DraggableItemList(QListWidget):
     def dropEvent(self, event):
         source = event.source()
         if isinstance(source, DraggableItemList) and source.doc_key == self.doc_key:
-            # 1. Capture the Python objects BEFORE Qt serializes them
+            # Capture the Python objects BEFORE Qt serializes them
             dragged_items = [item.data(Qt.ItemDataRole.UserRole) for item in source.selectedItems()]
             if not dragged_items:
                 return
@@ -44,7 +47,7 @@ class DraggableItemList(QListWidget):
             from PySide6.QtCore import QTimer, QSignalBlocker
 
             # --- THE SHIELD ---
-            # 2. Block signals so the visual drop doesn't trigger the auto-scroll on the doomed item
+            # Block signals so the visual drop doesn't trigger the auto-scroll on the doomed item
             with QSignalBlocker(self), QSignalBlocker(source):
                 super().dropEvent(event)
 
@@ -54,7 +57,7 @@ class DraggableItemList(QListWidget):
                         new_item.setData(Qt.ItemDataRole.UserRole, dragged_items[i])
 
             # --- THE KEYBOARD LOGIC PIPELINE ---
-            # 3. Create a callback that forces the Rebuild -> Select order
+            # Create a callback that forces the Rebuild -> Select order
             def finalize_drop():
                 # A. Trigger the Rebuild (this deletes the old items and makes new ones)
                 self.itemDropped.emit()
@@ -68,7 +71,7 @@ class DraggableItemList(QListWidget):
                         self.setFocus()
                         break
 
-            # 4. Defer this logic by 0ms so Qt can safely finish its internal C++ Drop routine first
+            # Defer this logic by 0ms so Qt can safely finish its internal C++ Drop routine first
             QTimer.singleShot(0, finalize_drop)
 
         else:
@@ -143,15 +146,13 @@ class DraggableItemList(QListWidget):
         self.clear()
         for match_item in sorted_items:
             li = QListWidgetItem(self)
-            # Pass the signal emit as the callback
             custom_widget = ProductItem(match_item, eject_callback=self.itemEjected.emit)
             li.setSizeHint(custom_widget.sizeHint())
             li.setData(Qt.ItemDataRole.UserRole, match_item)
 
-            if match_item.best_match_name:
-                li.setToolTip(
-                    f"Gekoppeld aan: {match_item.best_match_name}\nZekerheid: {match_item.current_score:.0%}\n\nSleep om aan te passen.")
-            else:
-                li.setToolTip("Geen match gevonden.\nSleep om aan te passen.")
+            # --- THE NEW TOOLTIP ---
+            # Shows the full uncut name + the fixed confidence score
+            full_name = match_item.name
+            li.setToolTip(f"{full_name}\n\nZekerheid: {match_item.current_score:.0%}\nSleep om aan te passen.")
 
             self.setItemWidget(li, custom_widget)

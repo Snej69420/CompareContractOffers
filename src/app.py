@@ -101,10 +101,10 @@ class MainWindow(QMainWindow):
         self.top_bar.set_status(f"Analyse voltooid. {len(clusters)} clusters gevonden.")
         self.top_bar.set_analyze_enabled(True)
 
-        # 1. Extract dynamic document names straight from the dictionary keys
+        #  Extract dynamic document names straight from the dictionary keys
         doc_keys = list(unmatched_dict.keys())
 
-        # 2. Pass them to the N-document generalized ComparisonTab
+        #  Pass them to the N-document generalized ComparisonTab
         self.tab_manager.comparison_tab.populate_from_ai(doc_keys, clusters, lookup, unmatched_dict)
 
     def on_ai_error(self, err_msg: str):
