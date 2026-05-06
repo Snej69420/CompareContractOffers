@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QObject, QTimer, QPoint
 from PySide6.QtGui import QColor, QPalette
 
+from src.UI.Utils import set_reproducibility
 from src.AIWorker import AIWorker
 
 from src.Backend.loader import ContractLoader
@@ -19,6 +20,8 @@ from src.UI.Controls import TopBarControls
 from src.UI.TabManager import MainTabWidget
 
 from src.UI.Settings import settings
+
+set_reproducibility(42)
 
 class MainWindow(QMainWindow):
     def __init__(self):

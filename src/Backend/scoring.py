@@ -8,20 +8,9 @@ from dataclasses import dataclass
 from rank_bm25 import BM25Okapi
 from sentence_transformers import SentenceTransformer, util
 
+from src.UI.Utils import get_asset_path
 from src.Backend.loader import ContractLoader
 from src.Backend.textprocessing import TextNormalizer
-
-seed = 42
-os.environ['PYTHONHASHSEED'] = str(seed)
-random.seed(seed)
-np.random.seed(seed)
-torch.manual_seed(seed)
-if torch.cuda.is_available():
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-
 
 @dataclass
 class GlobalItem:
@@ -37,8 +26,10 @@ class ScoringEngine:
     def __init__(self, threshold: float = 0.45):
         self.threshold = threshold
         self.lump_sum_units = {'ff', ''}
-        print("Loading Semantic AI Model...")
-        self.ai_model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
+        model_name = 'paraphrase-multilingual-MiniLM-L12-v2'
+        local_model_path = get_asset_path(f"models/{model_name}")
+
+        self.ai_model = SentenceTransformer(local_model_path)
         self.BM25_WEIGHT = 0.50
         self.SEMANTIC_WEIGHT = 0.50
 

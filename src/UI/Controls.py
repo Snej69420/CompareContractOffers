@@ -1,8 +1,8 @@
-from pathlib import Path
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QPushButton, QLabel, QFrame
 from PySide6.QtGui import QIcon, QCursor
 from PySide6.QtCore import Qt, Signal, QSize
 
+from src.UI.Utils import get_asset_path
 from src.UI.Settings import settings
 from src.UI.DataRepresentation.Shortcut import ShortcutDialog
 
@@ -17,11 +17,10 @@ class TopBarControls(QWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 10)
 
-        icon_dir = Path(__file__).parent.parent.parent / "assets"
 
         # --- Load Documents ---
         self.load_btn = QPushButton(" Offertes inladen")
-        self.load_btn.setIcon(QIcon(str(icon_dir / "folder.svg")))
+        self.load_btn.setIcon(QIcon(get_asset_path("assets/folder.svg")))
         self.load_btn.setIconSize(QSize(18, 18))
         self.load_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
 
@@ -62,7 +61,7 @@ class TopBarControls(QWidget):
         # --- Export to Excel (success colour) ---
         self.export_btn = QPushButton(" Exporteer Excel")
         # Ensure you have an appropriate icon, fallback to text if missing
-        self.export_btn.setIcon(QIcon(str(icon_dir / "file-spreadsheet.svg")))
+        self.export_btn.setIcon(QIcon(get_asset_path("assets/file-spreadsheet.svg")))
         self.export_btn.setIconSize(QSize(18, 18))
         self.export_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
 
@@ -111,7 +110,7 @@ class TopBarControls(QWidget):
 
         # --- Info Button ---
         self.info_btn = QPushButton()
-        self.info_btn.setIcon(QIcon(str(icon_dir / "info.svg")))
+        self.info_btn.setIcon(QIcon(get_asset_path("assets/info.svg")))
         self.info_btn.setIconSize(view_icon_size)
         self.info_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self.info_btn.setToolTip("Bekijk sneltoetsen")
@@ -128,14 +127,14 @@ class TopBarControls(QWidget):
 
         # --- Font Controls ---
         btn_font_min = QPushButton()
-        btn_font_min.setIcon(QIcon(str(icon_dir / "decrease-fontsize.svg")))
+        btn_font_min.setIcon(QIcon(get_asset_path("assets/decrease-fontsize.svg")))
         btn_font_min.setIconSize(view_icon_size)
         btn_font_min.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         btn_font_min.setStyleSheet(mini_btn_style)
         btn_font_min.clicked.connect(lambda checked=False: settings.adjust_font_size(-1))
 
         btn_font_plus = QPushButton()
-        btn_font_plus.setIcon(QIcon(str(icon_dir / "increase-fontsize.svg")))
+        btn_font_plus.setIcon(QIcon(get_asset_path("assets/increase-fontsize.svg")))
         btn_font_plus.setIconSize(view_icon_size)
         btn_font_plus.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         btn_font_plus.setStyleSheet(mini_btn_style)
@@ -153,14 +152,14 @@ class TopBarControls(QWidget):
 
         # --- Decimal Controls ---
         btn_dec_min = QPushButton()
-        btn_dec_min.setIcon(QIcon(str(icon_dir / "decrease-precision.svg")))
+        btn_dec_min.setIcon(QIcon(get_asset_path("assets/decrease-precision.svg")))
         btn_dec_min.setIconSize(view_icon_size)
         btn_dec_min.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         btn_dec_min.setStyleSheet(mini_btn_style)
         btn_dec_min.clicked.connect(lambda checked=False: settings.adjust_decimals(-1))
 
         btn_dec_plus = QPushButton()
-        btn_dec_plus.setIcon(QIcon(str(icon_dir / "increase-precision.svg")))
+        btn_dec_plus.setIcon(QIcon(get_asset_path("assets/increase-precision.svg")))
         btn_dec_plus.setIconSize(view_icon_size)
         btn_dec_plus.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         btn_dec_plus.setStyleSheet(mini_btn_style)

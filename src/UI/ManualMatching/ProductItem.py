@@ -1,7 +1,7 @@
-from pathlib import Path
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QPushButton, QLabel, QSizePolicy
-from PySide6.QtCore import Qt, QSize
+from PySide6.QtCore import Qt
 
+from src.UI.Utils import get_asset_path
 from src.UI.ManualMatching.MatchItem import MatchItem
 from src.UI.Settings import settings
 
@@ -27,9 +27,8 @@ class ProductItem(QWidget):
         settings.decimalsChanged.connect(self.refresh_numbers)
         self.refresh_numbers()
 
-        icon_dir = Path(__file__).parent.parent.parent.parent / "assets"
-        normal_path = (icon_dir / "close.svg").as_posix()
-        hover_path = (icon_dir / "close-hover.svg").as_posix()
+        normal_path = get_asset_path("assets/close.svg")
+        hover_path = get_asset_path("assets/close-hover.svg")
 
         self.eject_btn = QPushButton()
         self.eject_btn.setFixedSize(22, 22)

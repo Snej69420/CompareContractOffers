@@ -1,8 +1,9 @@
 from pathlib import Path
 from PySide6.QtWidgets import QTabWidget, QTabBar
-from PySide6.QtCore import Qt, Signal, QSize
-from PySide6.QtGui import QIcon, QCursor
+from PySide6.QtCore import Signal, QSize
+from PySide6.QtGui import QIcon
 
+from src.UI.Utils import get_asset_path
 from src.UI.DataRepresentation.ComparisonTab import ComparisonTab
 from src.UI.DataRepresentation.PreviewTab import PreviewTab
 from src.UI.DataRepresentation.DocumentTab import DocumentTab
@@ -35,9 +36,8 @@ class MainTabWidget(QTabWidget):
         self.add_fixed_tab(self.comparison_tab, "AI Vergelijking", "columns")
         self.add_fixed_tab(self.preview_tab, "Rapport Voorbeeld", "table")
 
-        icon_dir = Path(__file__).parent.parent.parent / "assets"
-        close_icon = (icon_dir / "close.svg").as_posix()
-        close_hover_icon = (icon_dir / "close-hover.svg").as_posix()
+        close_icon = get_asset_path("assets/close.svg")
+        close_hover_icon = get_asset_path("assets/close-hover.svg")
 
         self.setStyleSheet(f"""
             QTabBar::close-button {{
@@ -53,8 +53,7 @@ class MainTabWidget(QTabWidget):
     def add_fixed_tab(self, widget, title, icon):
         idx = self.addTab(widget, title)
 
-        icon_dir = Path(__file__).parent.parent.parent / "assets"
-        self.setTabIcon(idx, QIcon(str(icon_dir / (icon + ".svg"))))
+        self.setTabIcon(idx, QIcon(get_asset_path(f"assets/{icon}.svg")))
         self.setIconSize(QSize(16, 16))
 
         # Hide the close button for these specific tabs
@@ -75,8 +74,7 @@ class MainTabWidget(QTabWidget):
         insert_idx = len(self.doc_tabs)
         idx = self.insertTab(insert_idx, doc_tab, f"{path.name}")
 
-        icon_dir = Path(__file__).parent.parent.parent / "assets"
-        self.setTabIcon(idx, QIcon(str(icon_dir / "file.svg")))
+        self.setTabIcon(idx, QIcon(get_asset_path("assets/file.svg")))
         self.setIconSize(QSize(16, 16))
 
         self.doc_tabs[path] = doc_tab

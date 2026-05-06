@@ -1,8 +1,8 @@
-from pathlib import Path
 from PySide6.QtWidgets import QPushButton, QMessageBox
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QIcon, QShortcut, QKeySequence
 
+from src.UI.Utils import get_asset_path
 from src.UI.ManualMatching.BaseCluster import BaseCluster
 from src.UI.DataProcessing.MatchingEngine import ClusterData  # Import our new data model
 
@@ -20,11 +20,10 @@ class Cluster(BaseCluster):
         self.cluster_id = cluster_id
         self.is_approved = False
 
-        icon_dir = Path(__file__).parent.parent.parent.parent / "assets"
-        self.open_icon = QIcon(str(icon_dir / "package-open.svg"))
-        self.closed_icon = QIcon(str(icon_dir / "package-closed.svg"))
-        self.approve_icon = QIcon(str(icon_dir / "check.svg"))
-        self.edit_icon = QIcon(str(icon_dir / "pencil.svg"))
+        self.open_icon = QIcon(get_asset_path("assets/package-open.svg"))
+        self.closed_icon = QIcon(get_asset_path("assets/package-closed.svg"))
+        self.approve_icon = QIcon(get_asset_path("assets/check.svg"))
+        self.edit_icon = QIcon(get_asset_path("assets/pencil.svg"))
         self.icon_label.setIcon(self.open_icon)
 
         self.setStyleSheet(
@@ -40,8 +39,8 @@ class Cluster(BaseCluster):
         """
 
         # Header buttons
-        self.excluded_icon = QIcon(str(icon_dir / "eye-off.svg"))
-        self.included_icon = QIcon(str(icon_dir / "eye.svg"))
+        self.excluded_icon = QIcon(get_asset_path("assets/eye-off.svg"))
+        self.included_icon = QIcon(get_asset_path("assets/eye.svg"))
 
         # 2. Update the exclude_btn
         self.exclude_btn = QPushButton()
@@ -51,7 +50,7 @@ class Cluster(BaseCluster):
         self.exclude_btn.clicked.connect(lambda: self.excludeToggled.emit(self.cluster_id))
 
         self.delete_btn = QPushButton()
-        self.delete_btn.setIcon(QIcon(str(icon_dir / "trash.svg")))
+        self.delete_btn.setIcon(QIcon(get_asset_path("assets/trash.svg")))
         self.delete_btn.setStyleSheet(button_style)
         self.delete_btn.setToolTip("Cluster verwijderen")
         self.delete_btn.clicked.connect(self.request_removal)

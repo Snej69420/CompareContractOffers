@@ -29,25 +29,25 @@ class DynamicTable(QTableView):
         self._apply_layout()
 
     def _apply_layout(self):
-        """Handles resizing and perfectly stretching the correct columns."""
         model = self.model()
-        if not model:
-            return
-
-        self.resizeColumnsToContents()
-        self.resizeRowsToContents()
+        if not model: return
 
         header = self.horizontalHeader()
-        header.setStretchLastSection(False)
 
-        stretch_candidates = ['naam', 'omschrijving', 'beschrijving', 'categorie', 'tekst']
+        # This tells columns to be only as wide as their content (ignores headers)
+        self.resizeColumnsToContents()
+
+        stretch_candidates = ['naam', 'omschrijving']
+        compact_candidates = ['hoev', 'eh', 'ep', 'tot', '%']
 
         for i in range(model.columnCount()):
             col_name = str(model.headerData(i, Qt.Orientation.Horizontal)).lower()
-            if any(candidate in col_name for candidate in stretch_candidates):
+
+            if any(c in col_name for c in stretch_candidates):
                 header.setSectionResizeMode(i, QHeaderView.ResizeMode.Stretch)
-            else:
-                header.setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
+            elif any(c in col_name for c in compact_candidates):
+                # ResizeToContents makes it as small as the numbers allow
+                header.setSectionResizeMode(i, QHeaderView.ResizeMode.ResizeToContents)
 
     def _apply_styles(self):
         self.setStyleSheet(f"""
