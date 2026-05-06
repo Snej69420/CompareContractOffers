@@ -3,7 +3,7 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QTableView, QHeaderV
 from PySide6.QtCore import Qt, QTimer
 
 from src.UI.DataRepresentation.DataTable import DataTableModel
-from src.UI.DataModels.ReportGenerator import ReportGenerator
+from src.UI.DataProcessing.ReportGenerator import ReportGenerator
 from src.UI.DataRepresentation.DynamicTable import DynamicTable
 
 class PreviewTab(QWidget):
@@ -44,22 +44,28 @@ class PreviewTab(QWidget):
     def _get_state_fingerprint(self, clusters_data, unmatched_items):
         """Creates a unique string identifying the current exact layout of items."""
         fingerprint = ""
+
+        # 1. Fingerprint Clusters
         for idx, cluster in enumerate(clusters_data):
             cluster_str = ""
-
             items_dict = cluster.get('items', cluster)  # Fallback to raw cluster just in case
             is_excluded = cluster.get('is_excluded', False)
 
-            # Only loop over the documents inside the items dictionary
             for key in sorted(items_dict.keys()):
                 names = ",".join([str(i.name) for i in items_dict[key]])
                 cluster_str += f"{key}[{names}]"
 
-            # Embed the exclusion state into the fingerprint so the table redraws when toggled!
             fingerprint += f"C{idx}(excl:{is_excluded}):{cluster_str}|"
 
-        u_names = ",".join([str(i.name) for i in unmatched_items])
-        fingerprint += f"U:[{u_names}]"
+        # 2. Fingerprint Unmatched (Now handled as pseudo-clusters)
+        u_str = ""
+        for idx, pseudo_cluster in enumerate(unmatched_items):
+            items_dict = pseudo_cluster.get('items', pseudo_cluster)
+            for key in sorted(items_dict.keys()):
+                names = ",".join([str(i.name) for i in items_dict[key]])
+                u_str += f"{key}[{names}]"
+
+        fingerprint += f"U:[{u_str}]"
 
         return fingerprint
 

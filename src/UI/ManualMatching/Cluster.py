@@ -4,7 +4,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QIcon, QShortcut, QKeySequence
 
 from src.UI.ManualMatching.BaseCluster import BaseCluster
-from src.UI.DataModels.MatchingEngine import ClusterData  # Import our new data model
+from src.UI.DataProcessing.MatchingEngine import ClusterData  # Import our new data model
 
 
 class Cluster(BaseCluster):

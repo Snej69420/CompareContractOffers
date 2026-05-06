@@ -7,7 +7,7 @@ from PySide6.QtGui import QShortcut, QKeySequence
 from src.UI.ManualMatching.Cluster import Cluster
 from src.UI.ManualMatching.Unmatched import Unmatched
 # Data Model Imports
-from src.UI.DataModels.MatchingEngine import MatchingEngine
+from src.UI.DataProcessing.MatchingEngine import MatchingEngine
 
 
 class PagedScrollArea(QScrollArea):
