@@ -1,8 +1,8 @@
 import pandas as pd
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QTableView, QHeaderView
 from PySide6.QtCore import Qt
-from src.UI.DataModel.DataTable import DataTableModel
-from src.UI.DataModel.DynamicTable import DynamicTable
+from src.UI.DataRepresentation.DataTable import DataTableModel
+from src.UI.DataRepresentation.DynamicTable import DynamicTable
 
 class DocumentTab(QWidget):
     def __init__(self, df: pd.DataFrame, file_name: str):

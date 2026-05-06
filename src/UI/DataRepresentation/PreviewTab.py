@@ -2,9 +2,9 @@ import pandas as pd
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QTableView, QHeaderView
 from PySide6.QtCore import Qt, QTimer
 
-from src.UI.DataModel.DataTable import DataTableModel
-from src.UI.DataModel.ReportGenerator import ReportGenerator
-from src.UI.DataModel.DynamicTable import DynamicTable
+from src.UI.DataRepresentation.DataTable import DataTableModel
+from src.UI.DataModels.ReportGenerator import ReportGenerator
+from src.UI.DataRepresentation.DynamicTable import DynamicTable
 
 class PreviewTab(QWidget):
     def __init__(self):
@@ -45,12 +45,18 @@ class PreviewTab(QWidget):
         """Creates a unique string identifying the current exact layout of items."""
         fingerprint = ""
         for idx, cluster in enumerate(clusters_data):
-            # Dynamically sort and append whatever keys are in the cluster
             cluster_str = ""
-            for key in sorted(cluster.keys()):
-                names = ",".join([str(i.name) for i in cluster[key]])
+
+            items_dict = cluster.get('items', cluster)  # Fallback to raw cluster just in case
+            is_excluded = cluster.get('is_excluded', False)
+
+            # Only loop over the documents inside the items dictionary
+            for key in sorted(items_dict.keys()):
+                names = ",".join([str(i.name) for i in items_dict[key]])
                 cluster_str += f"{key}[{names}]"
-            fingerprint += f"C{idx}:{cluster_str}|"
+
+            # Embed the exclusion state into the fingerprint so the table redraws when toggled!
+            fingerprint += f"C{idx}(excl:{is_excluded}):{cluster_str}|"
 
         u_names = ",".join([str(i.name) for i in unmatched_items])
         fingerprint += f"U:[{u_names}]"
@@ -75,23 +81,26 @@ class PreviewTab(QWidget):
             if project_name == "Project Onbekend":
                 project_name = df.attrs.get('project', 'Project Onbekend')
 
-        self.header_label.setText(f"📁 Project: {project_name}")
+        self.header_label.setText(f"Project: {project_name}")
 
-        # Generate Data
+        # ---> THE NEW GENERATOR CALL <---
         generator = ReportGenerator(names)
-        df_data, df_colors, spans = generator.generate(self._pending_clusters, self._pending_unmatched)
+        df_data, df_colors, v_spans, h_spans = generator.generate(self._pending_clusters, self._pending_unmatched)
 
         # Render Table Model
         model = DataTableModel(df_data, df_colors)
         self.table.setModel(model)
 
-        # --- 3. Initial Layout & Spans ---
-        # We clear old spans, set initial stretch for the first load, and apply the new spans.
         self.table.clearSpans()
 
-        # VITAL: Re-apply the vertical cell merging for the report
-        for row_start, row_span, c_name in spans:
+        # ---> 1. Apply the new Horizontal Spans (Headers & Titles) <---
+        for row, col, row_span, col_span in h_spans:
+            self.table.setSpan(row, col, row_span, col_span)
+
+        # ---> 2. Apply Vertical Spans safely from raw Data <---
+        for row_start, row_span, c_name in v_spans:
             for col_idx in range(model.columnCount()):
-                col_header = str(model.headerData(col_idx, Qt.Orientation.Horizontal))
-                if c_name in col_header:
+                # Lookup the raw tuple in the dataframe directly!
+                col_tuple = df_data.columns[col_idx]
+                if c_name == col_tuple[0]:
                     self.table.setSpan(row_start, col_idx, row_span, 1)

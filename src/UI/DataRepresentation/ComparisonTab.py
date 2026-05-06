@@ -7,7 +7,7 @@ from PySide6.QtGui import QShortcut, QKeySequence
 from src.UI.ManualMatching.Cluster import Cluster
 from src.UI.ManualMatching.Unmatched import Unmatched
 # Data Model Imports
-from src.UI.MatchingEngine import MatchingEngine
+from src.UI.DataModels.MatchingEngine import MatchingEngine
 
 
 class PagedScrollArea(QScrollArea):
@@ -85,6 +85,8 @@ class ComparisonTab(QWidget):
         self.cluster_layout = QVBoxLayout(self.cluster_container)
         self.cluster_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.cluster_layout.setContentsMargins(25, 0, 25, 0)
+        self.cluster_layout.setSpacing(10)
+
         self.scroll_area.setWidget(self.cluster_container)
         self.layout.addWidget(self.scroll_area)
 
@@ -127,10 +129,10 @@ class ComparisonTab(QWidget):
         # but for now this replaces your old scrape logic perfectly.
         clusters_data = []
         for c_id, c_data in self.engine.clusters.items():
-            cluster_dict = {}
-            for key, items in c_data.items.items():
-                cluster_dict[key] = items
-            clusters_data.append(cluster_dict)
+            clusters_data.append({
+                'items': c_data.items,
+                'is_excluded': c_data.is_excluded
+            })
 
         unmatched_items = []
         for items in self.engine.unmatched.values():
@@ -177,19 +179,24 @@ class ComparisonTab(QWidget):
         self.cluster_layout.addWidget(self.parking_lot_widget)
         self._update_parking_lot_widget()
 
+        self.parking_lot_widget.requestNeighborMove.connect(self.handle_neighbor_move)
+        self.parking_lot_widget.requestGlobalNavigation.connect(self.handle_global_navigation)
+        self.parking_lot_widget.requestDragRoute.connect(self.handle_drag_drop)
+
         self.stateChanged.emit()
         QTimer.singleShot(100, self.recalculate_column_widths)
 
     def _create_cluster_widget(self, cluster_id: int):
         widget = Cluster(cluster_id, self.engine.doc_keys)
 
-        # When the widget says "Delete me", tell the Engine.
         widget.clusterRemoved.connect(self.engine.delete_cluster)
-
-        # When the widget says "Eject this item", route it to the Engine.
         widget.itemEjected.connect(lambda item, c_id: self.engine.move_item(item, c_id, None))
+        widget.excludeToggled.connect(self.engine.toggle_exclusion)
 
-        # (Drag and drop signals will be routed here later)
+        # drag and drop
+        widget.requestNeighborMove.connect(self.handle_neighbor_move)
+        widget.requestGlobalNavigation.connect(self.handle_global_navigation)
+        widget.requestDragRoute.connect(self.handle_drag_drop)
 
         # Inject above parking lot
         if self.parking_lot_widget:
@@ -227,25 +234,131 @@ class ComparisonTab(QWidget):
     def recalculate_column_widths(self):
         if not self.engine.doc_keys: return
         viewport_width = self.scroll_area.viewport().width()
-        actual_layout_margins = 50
-        safe_dead_space = actual_layout_margins + 2
-        spacing = 10
+
+        left_margin, _, right_margin, _ = self.cluster_layout.getContentsMargins()
+
+        # ---> PERFECT ALIGNMENT: Read the exact border thickness of the Cluster Frame <---
+        frame_offset = 0
+        if self.cluster_widgets:
+            frame_offset = list(self.cluster_widgets.values())[0].frameWidth()
+        elif self.parking_lot_widget:
+            frame_offset = self.parking_lot_widget.frameWidth()
+
+        # Offset the headers perfectly to match the list's interior position
+        self.column_headers_layout.setContentsMargins(left_margin + frame_offset, 0, right_margin + frame_offset, 0)
+
+        # Include the frame borders in the dead space calculations
+        safe_dead_space = left_margin + right_margin + (frame_offset * 2)
+
+        spacing = self.column_headers_layout.spacing()
+        if spacing < 0: spacing = 10
+
         min_col_width = 330
         available_for_lists = viewport_width - safe_dead_space
         visible_cols = max(1, available_for_lists // min_col_width)
         visible_cols = min(visible_cols, len(self.engine.doc_keys))
+
         total_gaps = (visible_cols - 1) * spacing
-        exact_col_width = math.ceil((available_for_lists - total_gaps) / visible_cols)
+
+        # ---> THE OVERFLOW FIX: Use floor instead of ceil so we never wrap onto a new line! <---
+        exact_col_width = math.floor((available_for_lists - total_gaps) / visible_cols)
 
         snap_step = exact_col_width + spacing
         self.scroll_area.snap_step = snap_step
         self.scroll_area.horizontalScrollBar().setSingleStep(snap_step)
 
+        # Apply width to headers
         self.column_headers_layout.setSpacing(spacing)
         for i in range(self.column_headers_layout.count()):
             widget = self.column_headers_layout.itemAt(i).widget()
             if widget: widget.setFixedWidth(exact_col_width)
 
-        for widget in self.cluster_widgets.values():
+        # Apply width to clusters
+        all_clusters = list(self.cluster_widgets.values())
+        if self.parking_lot_widget:
+            all_clusters.append(self.parking_lot_widget)
+
+        for widget in all_clusters:
+            lists_layout = widget.lists_widget.layout()
+            lists_layout.setSpacing(spacing)
+            lists_layout.setContentsMargins(0, 0, 0, 0)
+
             for lst in widget.lists.values():
                 lst.setFixedWidth(exact_col_width)
+
+    # ==========================================
+    # --- KEYBOARD SHORTCUT ROUTING ---
+    # ==========================================
+
+    def handle_neighbor_move(self, source_widget, match_item, direction):
+        """Fired by Ctrl+Up / Ctrl+Down to move items between clusters."""
+        idx = self.cluster_layout.indexOf(source_widget)
+        target_idx = idx - 1 if direction == "up" else idx + 1
+
+        if 0 <= target_idx < self.cluster_layout.count():
+            target_widget = self.cluster_layout.itemAt(target_idx).widget()
+
+            # Skip over the 'Add Cluster' button if we hit it
+            if isinstance(target_widget, QPushButton):
+                target_idx = target_idx - 1 if direction == "up" else target_idx + 1
+                if 0 <= target_idx < self.cluster_layout.count():
+                    target_widget = self.cluster_layout.itemAt(target_idx).widget()
+                else:
+                    return
+
+            # Translate widget objects into Engine IDs
+            source_id = getattr(source_widget, 'cluster_id', None)
+            target_id = getattr(target_widget, 'cluster_id', None)
+
+            # Let the Engine do the math!
+            self.engine.move_item(match_item, source_id, target_id)
+
+            # Move the visual cursor to follow the item
+            if hasattr(target_widget, 'focus_on_item'):
+                target_widget.focus_on_item(match_item)
+
+    def handle_global_navigation(self, source_widget, doc_key, direction):
+        """Fired by Up/Down arrows to jump borders between clusters."""
+        idx = self.cluster_layout.indexOf(source_widget)
+        target_idx = idx - 1 if direction == "up" else idx + 1
+
+        if 0 <= target_idx < self.cluster_layout.count():
+            target_widget = self.cluster_layout.itemAt(target_idx).widget()
+
+            if isinstance(target_widget, QPushButton):
+                target_idx = target_idx - 1 if direction == "up" else target_idx + 1
+                if 0 <= target_idx < self.cluster_layout.count():
+                    target_widget = self.cluster_layout.itemAt(target_idx).widget()
+                else:
+                    return
+
+            target_list = target_widget.lists[doc_key]
+            target_list.setFocus()
+
+            if target_list.count() > 0:
+                target_list.setCurrentRow(target_list.count() - 1 if direction == "up" else 0)
+
+    def handle_drag_drop(self, match_item, source_list, target_list):
+        """Translates a visual mouse drop into an Engine movement."""
+        source_id = None
+        target_id = None
+
+        all_clusters = list(self.cluster_widgets.values())
+        if self.parking_lot_widget:
+            all_clusters.append(self.parking_lot_widget)
+
+        # Figure out which cluster ID owns the source and target lists
+        for widget in all_clusters:
+            if source_list in widget.lists.values():
+                source_id = getattr(widget, 'cluster_id', None)
+            if target_list in widget.lists.values():
+                target_id = getattr(widget, 'cluster_id', None)
+
+        # Send it to the engine! (The engine handles UI redraw automatically)
+        self.engine.move_item(match_item, source_id, target_id)
+
+        # Focus the item in its new home
+        for widget in all_clusters:
+            if getattr(widget, 'cluster_id', None) == target_id:
+                if hasattr(widget, 'focus_on_item'):
+                    widget.focus_on_item(match_item)

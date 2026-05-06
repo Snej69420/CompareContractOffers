@@ -69,16 +69,15 @@ class DataTableModel(QAbstractTableModel):
 
         return None
 
-    def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
-        if role == Qt.ItemDataRole.DisplayRole:
-            # --- FLATTEN MULTI-INDEX COLUMNS FOR QT ---
-            if orientation == Qt.Orientation.Horizontal:
-                col_name = self._data.columns[section]
-                if isinstance(col_name, tuple):
-                    return "\n".join(str(x) for x in col_name)
-                return str(col_name)
+    def headerData(self, section, orientation, role=Qt.DisplayRole):
+        if role == Qt.DisplayRole:
+            if orientation == Qt.Horizontal:
+                # Grab the raw column tuple: ('Contractor A', 'Naam')
+                col_tuple = self._data.columns[section]
 
-            # Vertical row numbers
-            if orientation == Qt.Orientation.Vertical:
-                return str(self._data.index[section] + 1)
+                # ONLY return the metric! The cramped contractor name is gone!
+                return col_tuple[1]
+
+            if orientation == Qt.Vertical:
+                return str(section + 1)
         return None
