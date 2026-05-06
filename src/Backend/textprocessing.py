@@ -103,7 +103,7 @@ class TextNormalizer:
             b_large = [v for v in vals_b if v >= 10.0]
             b_small = [v for v in vals_b if v < 10.0]
 
-            # Compare Large vs Large
+            # Backend Large vs Large
             if a_large and b_large:
                 has_close = False
                 for va in a_large:
@@ -116,7 +116,7 @@ class TextNormalizer:
                     if has_close: break
                 if not has_close: return True # CLASH
 
-            # Compare Small vs Small
+            # Backend Small vs Small
             if a_small and b_small:
                 has_close = False
                 for va in a_small:

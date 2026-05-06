@@ -8,8 +8,8 @@ from dataclasses import dataclass
 from rank_bm25 import BM25Okapi
 from sentence_transformers import SentenceTransformer, util
 
-from src.Compare.loader import ContractLoader
-from src.Compare.textprocessing import TextNormalizer
+from src.Backend.loader import ContractLoader
+from src.Backend.textprocessing import TextNormalizer
 
 seed = 42
 os.environ['PYTHONHASHSEED'] = str(seed)
