@@ -9,6 +9,7 @@ class DraggableItemList(QListWidget):
     itemEjected = Signal(object)
     moveToNeighbor = Signal(object, str)
     navigateBoundary = Signal(str, str)  # contract id, direction ('up', 'down', 'left', 'right')
+    requestDragRoute = Signal(object, object, object)  # match_item, source_list, target_list
 
     def __init__(self, doc_key: str, all_keys: list[str]):
         super().__init__()
@@ -38,41 +39,18 @@ class DraggableItemList(QListWidget):
     def dropEvent(self, event):
         source = event.source()
         if isinstance(source, DraggableItemList) and source.doc_key == self.doc_key:
-            # Capture the Python objects BEFORE Qt serializes them
             dragged_items = [item.data(Qt.ItemDataRole.UserRole) for item in source.selectedItems()]
-            if not dragged_items:
-                return
+            if not dragged_items: return
+
             match_item = dragged_items[0]
 
-            from PySide6.QtCore import QTimer, QSignalBlocker
+            # ---> THE FIX: Prevent Qt from duplicating or moving the C++ item. <---
+            # We want our data Engine to handle this!
+            event.setDropAction(Qt.DropAction.IgnoreAction)
+            event.accept()
 
-            # --- THE SHIELD ---
-            # Block signals so the visual drop doesn't trigger the auto-scroll on the doomed item
-            with QSignalBlocker(self), QSignalBlocker(source):
-                super().dropEvent(event)
-
-                # Re-attach the Python objects
-                for i, new_item in enumerate(self.selectedItems()):
-                    if i < len(dragged_items):
-                        new_item.setData(Qt.ItemDataRole.UserRole, dragged_items[i])
-
-            # --- THE KEYBOARD LOGIC PIPELINE ---
-            # Create a callback that forces the Rebuild -> Select order
-            def finalize_drop():
-                # A. Trigger the Rebuild (this deletes the old items and makes new ones)
-                self.itemDropped.emit()
-                if source != self:
-                    source.itemDropped.emit()
-
-                # B. Find the brand new C++ item and select it manually
-                for i in range(self.count()):
-                    if self.item(i).data(Qt.ItemDataRole.UserRole) is match_item:
-                        self.setCurrentRow(i)  # This triggers the safe auto-scroll!
-                        self.setFocus()
-                        break
-
-            # Defer this logic by 0ms so Qt can safely finish its internal C++ Drop routine first
-            QTimer.singleShot(0, finalize_drop)
+            # Tell the routing layer what we want to do (Move item from Source to Self)
+            self.requestDragRoute.emit(match_item, source, self)
 
         else:
             event.ignore()
