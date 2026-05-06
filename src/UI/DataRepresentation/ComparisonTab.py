@@ -97,6 +97,7 @@ class ComparisonTab(QWidget):
 
         # Add Cluster Button
         self.add_cluster_btn = QPushButton("Nieuwe cluster toevoegen")
+        self.add_cluster_btn.setEnabled(False)
         self.add_cluster_btn.setStyleSheet(
             "background-color: #007bff; color: white; font-weight: bold; border-radius: 5px; padding: 10px; margin: 10px 25px;"
         )
@@ -145,6 +146,7 @@ class ComparisonTab(QWidget):
     # ==========================================
 
     def _build_entire_ui(self):
+        self.add_cluster_btn.setEnabled(True)
         """Fires once when a new document is loaded."""
         # 1. Clear Headers
         while self.column_headers_layout.count():

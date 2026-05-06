@@ -72,11 +72,18 @@ class DataTableModel(QAbstractTableModel):
     def headerData(self, section, orientation, role=Qt.DisplayRole):
         if role == Qt.DisplayRole:
             if orientation == Qt.Horizontal:
-                # Grab the raw column tuple: ('Contractor A', 'Naam')
-                col_tuple = self._data.columns[section]
+                col_name = str(self._data.columns[section])
 
-                # ONLY return the metric! The cramped contractor name is gone!
-                return col_tuple[1]
+                # If it's a MultiIndex (Comparison Tab)
+                if isinstance(self._data.columns, pd.MultiIndex):
+                    col_tuple = self._data.columns[section]
+                    col_name = col_tuple[1]
+
+                # FIX: If the header is an "Unnamed" artifact or a single-letter placeholder
+                if "Unnamed" in col_name or len(col_name) <= 1:
+                    return ""  # Return empty string for a cleaner look
+
+                return col_name
 
             if orientation == Qt.Vertical:
                 return str(section + 1)

@@ -58,6 +58,9 @@ class MatchingEngine(QObject):
 
     def create_empty_cluster(self) -> int:
         """Creates a new empty cluster and returns its ID."""
+        if not self.doc_keys:
+            return -1
+
         c_id = self._next_cluster_id
         self.clusters[c_id] = ClusterData(c_id, self.doc_keys)
         self._next_cluster_id += 1

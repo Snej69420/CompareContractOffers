@@ -67,12 +67,13 @@ class MainTabWidget(QTabWidget):
             self.setCurrentWidget(self.doc_tabs[path])
             return
 
-
-        doc_tab = DocumentTab(df, path.name)
+        contractor_name = df.attrs.get('contractor', path.stem)
+        project = df.attrs.get('project', path.stem)
+        doc_tab = DocumentTab(df, project)
 
         # Insert document tabs at the far left (index 0 or len of current docs)
         insert_idx = len(self.doc_tabs)
-        idx = self.insertTab(insert_idx, doc_tab, f"{path.name}")
+        idx = self.insertTab(insert_idx, doc_tab, contractor_name)
 
         self.setTabIcon(idx, QIcon(get_asset_path("assets/file.svg")))
         self.setIconSize(QSize(16, 16))

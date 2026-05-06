@@ -5,7 +5,7 @@ from src.UI.DataRepresentation.DataTable import DataTableModel
 from src.UI.DataRepresentation.DynamicTable import DynamicTable
 
 class DocumentTab(QWidget):
-    def __init__(self, df: pd.DataFrame, file_name: str):
+    def __init__(self, df: pd.DataFrame, project: str):
         super().__init__()
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(10, 10, 10, 10)
@@ -14,7 +14,7 @@ class DocumentTab(QWidget):
         drop_cols = [c for c in df.columns if c.strip().lower() == 'opmerkingen']
         df_display = df.drop(columns=drop_cols)
 
-        info_text = f"📄 Bestand: {file_name}   |   📊 Aantal items: {len(df_display)}"
+        info_text = f"Project: {project} | Aantal items: {len(df_display)}"
         self.info_label = QLabel(info_text)
         self.info_label.setStyleSheet("font-weight: bold; font-size: 14px; margin-bottom: 5px; color: #333;")
         self.layout.addWidget(self.info_label)
