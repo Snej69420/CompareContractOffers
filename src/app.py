@@ -12,7 +12,7 @@ from PySide6.QtGui import QColor, QPalette
 
 from src.AIWorker import AIWorker
 
-from src.Compare.loader import ContractLoader
+from src.Backend.loader import ContractLoader
 from src.UI.Controls import TopBarControls
 from src.UI.TabManager import MainTabWidget
 

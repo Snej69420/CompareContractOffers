@@ -2,7 +2,7 @@ from pathlib import Path
 import pandas as pd
 from PySide6.QtCore import QThread, Signal, QObject
 
-from src.Compare.scoring import ScoringEngine
+from src.Backend.scoring import ScoringEngine
 
 
 class WorkerSignals(QObject):
