@@ -4,7 +4,7 @@ from PySide6.QtGui import QIcon, QCursor
 from PySide6.QtCore import Qt, Signal, QSize
 
 from src.UI.Settings import settings
-
+from src.UI.DataRepresentation.Shortcut import ShortcutDialog # Make sure to import the dialog
 
 class TopBarControls(QWidget):
     loadRequested = Signal()
@@ -13,7 +13,7 @@ class TopBarControls(QWidget):
     def __init__(self):
         super().__init__()
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 10)  # Added slight bottom margin for breathing room
+        layout.setContentsMargins(0, 0, 0, 10)
 
         icon_dir = Path(__file__).parent.parent.parent / "assets"
 
@@ -42,7 +42,6 @@ class TopBarControls(QWidget):
         self.run_btn.setIconSize(QSize(18, 18))
         self.run_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
 
-        # REMOVED: hardcoded font-size so it obeys the global app settings
         self.run_btn.setStyleSheet("""
             QPushButton {
                 background-color: #007bff;
@@ -62,19 +61,15 @@ class TopBarControls(QWidget):
         self.status_label = QLabel("Klaar voor gebruik.")
         self.status_label.setStyleSheet("color: #555555; font-style: italic; margin-left: 10px;")
 
-        # Assemble Left Side
         layout.addWidget(self.load_btn)
         layout.addWidget(self.run_btn)
         layout.addWidget(self.status_label)
-
-        # Pushes everything added after this to the far right
         layout.addStretch()
 
         # ==========================================
         # --- VIEW CONTROLS (RIGHT SIDE) ---
         # ==========================================
 
-        # Shared style for the mini +/- buttons
         mini_btn_style = """
             QPushButton {
                 background-color: #ffffff;
@@ -86,6 +81,23 @@ class TopBarControls(QWidget):
             QPushButton:pressed { background-color: #ebebeb; }
         """
         view_icon_size = QSize(20, 20)
+
+        # --- NEW: Info Button ---
+        self.info_btn = QPushButton()
+        self.info_btn.setIcon(QIcon(str(icon_dir / "info.svg")))
+        self.info_btn.setIconSize(view_icon_size)
+        self.info_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self.info_btn.setToolTip("Bekijk sneltoetsen")
+        self.info_btn.setStyleSheet(mini_btn_style)
+        self.info_btn.clicked.connect(self.show_shortcuts_info)
+        layout.addWidget(self.info_btn)
+
+        # Separator
+        sep1 = QFrame()
+        sep1.setFrameShape(QFrame.Shape.VLine)
+        sep1.setFrameShadow(QFrame.Shadow.Sunken)
+        sep1.setStyleSheet("color: #ccc; margin: 0px 5px;")
+        layout.addWidget(sep1)
 
         # --- Font Controls ---
         btn_font_min = QPushButton()
@@ -105,12 +117,12 @@ class TopBarControls(QWidget):
         layout.addWidget(btn_font_min)
         layout.addWidget(btn_font_plus)
 
-        # Add a subtle vertical separator line
-        separator = QFrame()
-        separator.setFrameShape(QFrame.Shape.VLine)
-        separator.setFrameShadow(QFrame.Shadow.Sunken)
-        separator.setStyleSheet("color: #ccc; margin: 0px 10px;")
-        layout.addWidget(separator)
+        # Separator
+        sep2 = QFrame()
+        sep2.setFrameShape(QFrame.Shape.VLine)
+        sep2.setFrameShadow(QFrame.Shadow.Sunken)
+        sep2.setStyleSheet("color: #ccc; margin: 0px 5px;")
+        layout.addWidget(sep2)
 
         # --- Decimal Controls ---
         btn_dec_min = QPushButton()
@@ -135,3 +147,8 @@ class TopBarControls(QWidget):
 
     def set_analyze_enabled(self, enabled: bool):
         self.run_btn.setEnabled(enabled)
+
+    def show_shortcuts_info(self):
+        # Open the dialog right here
+        dialog = ShortcutDialog(self)
+        dialog.exec()

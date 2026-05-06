@@ -3,9 +3,9 @@ from PySide6.QtWidgets import QTabWidget, QTabBar
 from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtGui import QIcon, QCursor
 
-from src.UI.DataModel.ComparisonTab import ComparisonTab
-from src.UI.DataModel.PreviewTab import PreviewTab
-from src.UI.DataModel.DocumentTab import DocumentTab
+from src.UI.DataRepresentation.ComparisonTab import ComparisonTab
+from src.UI.DataRepresentation.PreviewTab import PreviewTab
+from src.UI.DataRepresentation.DocumentTab import DocumentTab
 
 
 class MainTabWidget(QTabWidget):
