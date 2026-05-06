@@ -2,7 +2,6 @@ import openpyxl
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 from collections import Counter
-import matplotlib.colors as mcolors
 
 
 class ExcelExporter:
@@ -21,10 +20,7 @@ class ExcelExporter:
         self.yellow_fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
         self.header_font = Font(bold=True)
         self.title_font = Font(bold=True, size=14)
-        self.red_font = Font(color="FF0000")
-
-        # Custom Colormap for Percentages
-        self.orange_to_red = mcolors.LinearSegmentedColormap.from_list("OrangeToRed", ["#FF9900", "#FF0000"])
+        self.red_font = Font(color="FF0000")  # Kept ONLY for flagging parsing mismatches (Hoev/EH)
 
         # Alignments
         self.center_align = Alignment(horizontal="center", vertical="center")
@@ -84,31 +80,11 @@ class ExcelExporter:
                 current_row = self._write_cluster(ws, cluster, current_row)
 
         # Overview at the very bottom
-        self._write_overview(ws, current_row + 2, data_start_row, data_end_row, norm_clusters, norm_unmatched)
+        self._write_overview(ws, current_row + 2, data_start_row, data_end_row)
 
         wb.save(filepath)
 
-    def _calculate_contractor_total(self, contractor_key, norm_clusters, norm_unmatched):
-        """ Calculates static sum purely for color formatting on export. """
-        grand_total = 0.0
-        for cluster in norm_clusters:
-            if not cluster.get('is_excluded', False):
-                items = cluster.get('items', {}).get(contractor_key, [])
-                for item in items:
-                    if not getattr(item, 'is_unmatched_blank', False) and not getattr(item, 'is_missing', False):
-                        grand_total += (self._safe_float(item.qty) * self._safe_float(
-                            item.raw_data.get('Eenheidsprijs', 0.0)))
-
-        for pseudo_cluster in norm_unmatched:
-            items = pseudo_cluster.get('items', pseudo_cluster).get(contractor_key, [])
-            for item in items:
-                if not getattr(item, 'is_unmatched_blank', False) and not getattr(item, 'is_missing', False):
-                    grand_total += (
-                                self._safe_float(item.qty) * self._safe_float(item.raw_data.get('Eenheidsprijs', 0.0)))
-        return grand_total
-
-    def _write_overview(self, ws, overview_row: int, data_start: int, data_end: int, norm_clusters: list,
-                        norm_unmatched: list):
+    def _write_overview(self, ws, overview_row: int, data_start: int, data_end: int):
         # 1. Setup row labels
         ws.cell(row=overview_row, column=1, value="OVERZICHT").font = self.title_font
         ws.cell(row=overview_row + 1, column=1, value="Totale Projectprijs:").font = self.header_font
@@ -118,32 +94,30 @@ class ExcelExporter:
         sum_cell_refs = []
         col_offset = 5
         for k in self.contract_keys:
-            col_letter = get_column_letter(col_offset)  # Pointing to E, L, S (where the value actually is)
+            col_letter = get_column_letter(col_offset)  # Pointing to E, L, S
             sum_cell_refs.append(f"${col_letter}${overview_row + 1}")
             col_offset += 7
 
         # Build the absolute minimum reference formula (e.g., MIN($E$47,$L$47,$S$47))
         min_ref_formula = f"MIN({','.join(sum_cell_refs)})"
 
-        # 3. Calculate static totals to determine font colors (Green vs Red)
-        static_totals = {k: self._calculate_contractor_total(k, norm_clusters, norm_unmatched) for k in
-                         self.contract_keys}
-        min_static_total = min(static_totals.values()) if static_totals else 0.0
-
         col_offset = 5
+        # Define a reusable left-alignment style
+        left_align = Alignment(horizontal="left", vertical="center")
+
         for k in self.contract_keys:
             c_name = self.contract_names[k]
 
-            # Letters for formulas
-            sum_col_letter = get_column_letter(col_offset)  # e.g., E
-            tot_col_letter = get_column_letter(col_offset + 4)  # e.g., I (Used for the SUM range above)
-
-            sum_cell_coord = f"{sum_col_letter}{overview_row + 1}"  # e.g., E47
+            sum_col_letter = get_column_letter(col_offset)
+            tot_col_letter = get_column_letter(col_offset + 4)
+            sum_cell_coord = f"{sum_col_letter}{overview_row + 1}"
 
             # Row 0: Name Header
             ws.merge_cells(start_row=overview_row, start_column=col_offset, end_row=overview_row,
                            end_column=col_offset + 6)
-            ws.cell(row=overview_row, column=col_offset, value=c_name.upper()).font = self.header_font
+            name_cell = ws.cell(row=overview_row, column=col_offset, value=c_name.upper())
+            name_cell.font = self.header_font
+            name_cell.alignment = left_align
 
             # Row 1: The Total SUM
             sum_cell = ws.cell(row=overview_row + 1, column=col_offset)
@@ -152,33 +126,21 @@ class ExcelExporter:
             else:
                 sum_cell.value = 0.0
             sum_cell.number_format = '#,##0.00'
+            sum_cell.font = Font(bold=True)
+            sum_cell.alignment = left_align  # Added Left Alignment
             ws.merge_cells(start_row=overview_row + 1, start_column=col_offset, end_row=overview_row + 1,
                            end_column=col_offset + 3)
 
             # Row 2: Percentage Difference
             pct_cell = ws.cell(row=overview_row + 2, column=col_offset)
 
-            # YOUR EXACT FORMULA LOGIC (Translated for openpyxl)
-            # =IF(MIN($E$47,$L$47,$S$47)=E47, 0, (E47 / MIN($E$47,$L$47,$S$47)) - 1)
+            # Pure Dynamic Formula
             pct_cell.value = f"=IF({min_ref_formula}={sum_cell_coord}, 0, ({sum_cell_coord} / {min_ref_formula}) - 1)"
             pct_cell.number_format = '+0.0%;-0.0%;0.0%'
-            pct_cell.alignment = Alignment(horizontal="right", vertical="center")
+            pct_cell.font = Font(bold=True)
+            pct_cell.alignment = left_align  # Changed to Left Alignment
             ws.merge_cells(start_row=overview_row + 2, start_column=col_offset, end_row=overview_row + 2,
                            end_column=col_offset + 6)
-
-            # Apply Color formatting based on the static snapshot
-            diff_pct = (static_totals[k] - min_static_total) / min_static_total if min_static_total > 0 else 0.0
-
-            if diff_pct < 0.001:
-                color_font = Font(color="00B050", bold=True)  # Pure Green for cheapest
-            else:
-                norm = mcolors.Normalize(vmin=0.0, vmax=0.5)
-                rgba = self.orange_to_red(norm(diff_pct))
-                hex_color = mcolors.to_hex(rgba)[1:].upper()
-                color_font = Font(color=hex_color, bold=True)
-
-            sum_cell.font = color_font
-            pct_cell.font = color_font
 
             col_offset += 7
 
@@ -237,11 +199,9 @@ class ExcelExporter:
         if max_len == 0:
             return start_row
 
-        is_excluded = cluster.get('is_excluded', False)
         end_row = start_row + max_len - 1
 
         contractor_totals = {}
-        contractor_costs = {}
         contractor_units = []
         original_units = []
 
@@ -251,16 +211,12 @@ class ExcelExporter:
                            not getattr(i, 'is_unmatched_blank', False) and not getattr(i, 'is_missing', False)]
             if valid_items:
                 contractor_totals[k] = sum(self._safe_float(i.qty) for i in valid_items)
-                contractor_costs[k] = sum(
-                    self._safe_float(i.qty) * self._safe_float(i.raw_data.get('Eenheidsprijs', 0.0)) for i in
-                    valid_items)
                 for item in valid_items:
                     if item.unit:
                         contractor_units.append(str(item.unit).strip().lower())
                         original_units.append(item.unit)
             else:
                 contractor_totals[k] = None
-                contractor_costs[k] = None
 
         dom_tot_qty = self._get_dominant([v for v in contractor_totals.values() if v is not None])
         dom_cluster_unit_lower = self._get_dominant(contractor_units)
@@ -272,8 +228,6 @@ class ExcelExporter:
                     dom_cluster_unit = ou
                     break
 
-        valid_costs = [c for c in contractor_costs.values() if c is not None and c > 0]
-        min_cost = min(valid_costs) if valid_costs and not is_excluded else None
         shared_qty_col_letter = "B"
 
         for i in range(max_len):
@@ -363,7 +317,8 @@ class ExcelExporter:
                             c_cells[2].value = item.unit
                             c_cells[3].value = ep
 
-                            if not getattr(item, 'is_missing', False) and not is_excluded:
+                            if not getattr(item, 'is_missing', False):
+                                # Red text ONLY for Mismatches against the Algemeen columns
                                 if dom_tot_qty is not None and contractor_totals.get(k) is not None:
                                     if abs(contractor_totals[k] - dom_tot_qty) > 0.001:
                                         c_cells[1].font = self.red_font
@@ -381,19 +336,6 @@ class ExcelExporter:
                                 formula_tot = f"={c_qty_letter}{current_row} * {c_ep_letter}{current_row}"
 
                             c_cells[4].value = formula_tot
-
-                            if not getattr(item, 'is_missing', False) and min_cost is not None and contractor_costs.get(
-                                    k) is not None:
-                                cost = contractor_costs[k]
-                                diff_pct = (cost - min_cost) / min_cost if min_cost > 0 else 0.0
-
-                                if diff_pct < 0.001:
-                                    c_cells[4].font = Font(color="00B050", bold=True)
-                                else:
-                                    norm = mcolors.Normalize(vmin=0.0, vmax=0.5)
-                                    rgba = self.orange_to_red(norm(diff_pct))
-                                    hex_color = mcolors.to_hex(rgba)[1:].upper()
-                                    c_cells[4].font = Font(color=hex_color, bold=False)
 
                 col_offset += 7
 
@@ -418,26 +360,15 @@ class ExcelExporter:
 
             pct_cell = ws.cell(row=start_row, column=col_offset + 5)
 
-            if min_cost is not None and min_cost > 0 and contractor_costs.get(k) is not None:
-                cost = contractor_costs[k]
-                diff_pct = (cost - min_cost) / min_cost
+            if sum(1 for i in items if
+                   not getattr(i, 'is_unmatched_blank', False) and not getattr(i, 'is_missing', False)) > 0:
                 tot_col_letter = get_column_letter(col_offset + 4)
+                min_formula = f"MIN(" + ",".join(
+                    [f"{get_column_letter(5 + j * 7 + 4)}{start_row}" for j in range(len(self.contract_keys))]) + ")"
 
-                if num_items > 1:
-                    formula_pct = f"=(SUM({tot_col_letter}{start_row}:{tot_col_letter}{start_row + num_items - 1}) - {min_cost}) / {min_cost}"
-                else:
-                    formula_pct = f"=({tot_col_letter}{start_row} - {min_cost}) / {min_cost}"
-
-                pct_cell.value = formula_pct
+                # Dynamic Row Percentage Formula
+                pct_cell.value = f"=IF({min_formula}={tot_col_letter}{start_row}, 0, ({tot_col_letter}{start_row} / {min_formula}) - 1)"
                 pct_cell.number_format = '+0.0%;-0.0%;0.0%'
-
-                if diff_pct < 0.001:
-                    pct_cell.font = Font(color="00B050", bold=True)
-                else:
-                    norm = mcolors.Normalize(vmin=0.0, vmax=0.5)
-                    rgba = self.orange_to_red(norm(diff_pct))
-                    hex_color = mcolors.to_hex(rgba)[1:].upper()
-                    pct_cell.font = Font(color=hex_color, bold=False)
             else:
                 pct_cell.value = ""
 
