@@ -4,11 +4,13 @@ from PySide6.QtGui import QIcon, QCursor
 from PySide6.QtCore import Qt, Signal, QSize
 
 from src.UI.Settings import settings
-from src.UI.DataRepresentation.Shortcut import ShortcutDialog # Make sure to import the dialog
+from src.UI.DataRepresentation.Shortcut import ShortcutDialog
+
 
 class TopBarControls(QWidget):
     loadRequested = Signal()
     analyzeRequested = Signal()
+    exportRequested = Signal()  # <-- New Signal for Export
 
     def __init__(self):
         super().__init__()
@@ -57,12 +59,37 @@ class TopBarControls(QWidget):
         """)
         self.run_btn.clicked.connect(self.analyzeRequested.emit)
 
+        # --- Export to Excel (success colour) ---
+        self.export_btn = QPushButton(" Exporteer Excel")
+        # Ensure you have an appropriate icon, fallback to text if missing
+        self.export_btn.setIcon(QIcon(str(icon_dir / "file-spreadsheet.svg")))
+        self.export_btn.setIconSize(QSize(18, 18))
+        self.export_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+
+        self.export_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #28a745;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 20px;
+                font-weight: bold;
+            }
+            QPushButton:hover { background-color: #218838; }
+            QPushButton:pressed { background-color: #1e7e34; }
+            QPushButton:disabled { background-color: #94d3a2; color: #f8f9fa; }
+        """)
+        self.export_btn.clicked.connect(self.exportRequested.emit)
+        # Optional: Disable it initially until analysis is run
+        self.export_btn.setEnabled(False)
+
         # --- STATUS LABEL ---
         self.status_label = QLabel("Klaar voor gebruik.")
         self.status_label.setStyleSheet("color: #555555; font-style: italic; margin-left: 10px;")
 
         layout.addWidget(self.load_btn)
         layout.addWidget(self.run_btn)
+        layout.addWidget(self.export_btn)  # <-- Added to layout
         layout.addWidget(self.status_label)
         layout.addStretch()
 
@@ -82,7 +109,7 @@ class TopBarControls(QWidget):
         """
         view_icon_size = QSize(20, 20)
 
-        # --- NEW: Info Button ---
+        # --- Info Button ---
         self.info_btn = QPushButton()
         self.info_btn.setIcon(QIcon(str(icon_dir / "info.svg")))
         self.info_btn.setIconSize(view_icon_size)
@@ -148,7 +175,9 @@ class TopBarControls(QWidget):
     def set_analyze_enabled(self, enabled: bool):
         self.run_btn.setEnabled(enabled)
 
+    def set_export_enabled(self, enabled: bool):
+        self.export_btn.setEnabled(enabled)
+
     def show_shortcuts_info(self):
-        # Open the dialog right here
         dialog = ShortcutDialog(self)
         dialog.exec()
