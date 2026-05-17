@@ -2,19 +2,17 @@ import sys
 from pathlib import Path
 
 from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QLabel, QScrollArea, QTabWidget, QFileDialog, QMessageBox,
-    QTableView, QHeaderView
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QFileDialog, QMessageBox
 )
 
-from PySide6.QtCore import Qt, Signal, QObject, QTimer, QPoint
+from PySide6.QtCore import Qt, QStandardPaths
 from PySide6.QtGui import QColor, QPalette
 
 from src.UI.Utils import set_reproducibility
 from src.AIWorker import AIWorker
 
 from src.Backend.loader import ContractLoader
-from src.UI.DataProcessing.DataNormaliser import DataNormaliser # Add import
+from src.UI.DataProcessing.DataNormaliser import DataNormaliser
 from src.UI.DataProcessing.ExcelExporter import ExcelExporter
 from src.UI.Controls import TopBarControls
 from src.UI.TabManager import MainTabWidget
@@ -27,7 +25,6 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("AI Offertevergelijker")
-        self.resize(1000, 800)
 
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -53,7 +50,8 @@ class MainWindow(QMainWindow):
         self.tab_manager.stateChanged.connect(self.on_comparison_state_changed)
 
     def load_documents(self):
-        file_paths, _ = QFileDialog.getOpenFileNames(self, "Selecteer Offertes", "", "Excel Files (*.xlsx *.xls)")
+        downloads = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DownloadLocation)
+        file_paths, _ = QFileDialog.getOpenFileNames(self, "Selecteer Offertes", downloads, "Excel Files (*.xlsx *.xls)")
         if not file_paths:
             return
 
@@ -192,5 +190,6 @@ if __name__ == "__main__":
     app.setPalette(palette)
 
     window = MainWindow()
-    window.show()
+    window.resize(1200, 800)
+    window.showMaximized()
     sys.exit(app.exec())
