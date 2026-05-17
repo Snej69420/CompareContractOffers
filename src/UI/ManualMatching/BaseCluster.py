@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QPushButton
-from PySide6.QtCore import Signal, Qt, QSize, QTimer
+from PySide6.QtCore import Signal, Qt, QSize, QTimer, QItemSelectionModel
 from src.UI.ManualMatching.DraggableItemList import DraggableItemList
 
 
@@ -101,6 +101,40 @@ class BaseCluster(QFrame):
                     break
 
         QTimer.singleShot(0, _apply_focus)
+
+    def select_items(self, match_items: list):
+        """
+        Safely selects multiple items and moves the keyboard focus
+        without destroying the selection state.
+        """
+
+        def _apply_selection():
+            if not match_items:
+                return
+
+            target_list = self.lists[match_items[0].doc_key]
+            target_list.clearSelection()
+
+            first_row = -1
+
+            for match_item in match_items:
+                for i in range(target_list.count()):
+                    if target_list.item(i).data(Qt.ItemDataRole.UserRole) is match_item:
+                        target_list.item(i).setSelected(True)
+                        if first_row == -1:
+                            first_row = i
+                        break
+
+            if first_row != -1:
+                index = target_list.model().index(first_row, 0)
+                target_list.selectionModel().setCurrentIndex(
+                    index,
+                    QItemSelectionModel.SelectionFlag.NoUpdate
+                )
+
+            target_list.setFocus()
+
+        QTimer.singleShot(0, _apply_selection)
 
     def on_items_changed(self):
         """To be overridden by child classes to handle re-calculations."""

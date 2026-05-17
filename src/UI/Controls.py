@@ -58,7 +58,7 @@ class TopBarControls(QWidget):
         """)
         self.run_btn.clicked.connect(self.analyzeRequested.emit)
 
-        # --- Export to Excel (success colour) ---
+        # --- Export to Excel ---
         self.export_btn = QPushButton(" Exporteer Excel")
         # Ensure you have an appropriate icon, fallback to text if missing
         self.export_btn.setIcon(QIcon(get_asset_path("assets/file-spreadsheet.svg")))

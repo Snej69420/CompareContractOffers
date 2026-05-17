@@ -23,6 +23,7 @@ class ComparisonTab(QWidget):
         # --- CAROUSEL STATE ---
         self.current_start_index = 0
         self.visible_columns_count = 2
+        self.ideal_column_width = 512
 
         # --- 2. SETUP UI LAYOUT ---
         self.layout = QVBoxLayout(self)
@@ -224,6 +225,8 @@ class ComparisonTab(QWidget):
         self.update_carousel_view()
         self.stateChanged.emit()
 
+        QTimer.singleShot(0, self._recalculate_column_count)
+
     def _create_cluster_widget(self, cluster_id: int):
         widget = Cluster(cluster_id, self.engine.doc_keys)
 
@@ -266,10 +269,35 @@ class ComparisonTab(QWidget):
             self.parking_lot_widget.update_ui(self.engine.unmatched)
         self.stateChanged.emit()
 
+    def resizeEvent(self, event):
+        """Dynamically calculates how many columns to show based on window width."""
+        super().resizeEvent(event)
+        self._recalculate_column_count()
+
+    def _recalculate_column_count(self):
+        """The actual math for dynamic columns, usable anywhere."""
+        if not hasattr(self, 'engine') or not self.engine.doc_keys:
+            return
+
+        available_width = self.scroll_area.viewport().width()
+
+        if available_width > 0:
+            calculated_columns = available_width // self.ideal_column_width
+            new_count = max(2, min(calculated_columns, 5))
+            new_count = min(new_count, len(self.engine.doc_keys))
+
+            if new_count != self.visible_columns_count:
+                self.visible_columns_count = new_count
+
+                max_start_idx = max(0, len(self.engine.doc_keys) - self.visible_columns_count)
+                self.current_start_index = min(self.current_start_index, max_start_idx)
+
+                self.update_carousel_view()
+
     # ==========================================
     # --- KEYBOARD SHORTCUT ROUTING ---
     # ==========================================
-    def handle_neighbor_move(self, source_widget, match_item, direction):
+    def handle_neighbor_move(self, source_widget, match_items, direction):
         idx = self.cluster_layout.indexOf(source_widget)
         target_idx = idx - 1 if direction == "up" else idx + 1
 
@@ -286,10 +314,13 @@ class ComparisonTab(QWidget):
             source_id = getattr(source_widget, 'cluster_id', None)
             target_id = getattr(target_widget, 'cluster_id', None)
 
-            self.engine.move_item(match_item, source_id, target_id)
+            # Loop through all selected items and move them
+            for match_item in match_items:
+                self.engine.move_item(match_item, source_id, target_id)
 
-            if hasattr(target_widget, 'focus_on_item'):
-                target_widget.focus_on_item(match_item)
+            # Focus the first item in the moved batch
+            if hasattr(target_widget, 'select_items') and match_items:
+                target_widget.select_items(match_items)
 
     def handle_global_navigation(self, source_widget, key, direction):
         if direction in ("left", "right"):
@@ -346,7 +377,7 @@ class ComparisonTab(QWidget):
         """Forces the QScrollArea to bring the specific widget/row into view."""
         QTimer.singleShot(0, lambda: self.scroll_area.ensureWidgetVisible(target_widget, xmargin=0, ymargin=50))
 
-    def handle_drag_drop(self, match_item, source_list, target_list):
+    def handle_drag_drop(self, match_items, source_list, target_list):
         source_id = None
         target_id = None
 
@@ -360,9 +391,12 @@ class ComparisonTab(QWidget):
             if target_list in widget.lists.values():
                 target_id = getattr(widget, 'cluster_id', None)
 
-        self.engine.move_item(match_item, source_id, target_id)
+        # Loop through all dragged items and move them
+        for match_item in match_items:
+            self.engine.move_item(match_item, source_id, target_id)
 
+        # Focus the first item in the moved batch
         for widget in all_clusters:
             if getattr(widget, 'cluster_id', None) == target_id:
-                if hasattr(widget, 'focus_on_item'):
-                    widget.focus_on_item(match_item)
+                if hasattr(widget, 'focus_on_item') and match_items:
+                    widget.focus_on_item(match_items[0])

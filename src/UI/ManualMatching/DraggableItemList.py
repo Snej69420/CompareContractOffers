@@ -17,24 +17,37 @@ class DraggableItemList(QListWidget):
         self.doc_key = doc_key
         self.all_keys = all_keys
 
+        self.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
         self.setDragDropMode(QListWidget.DragDropMode.DragDrop)
         self.setDefaultDropAction(Qt.DropAction.MoveAction)
         self.setAcceptDrops(True)
-        # self.setMinimumWidth(480)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setResizeMode(QListWidget.ResizeMode.Adjust)
         self.setStyleSheet("""
-                    QListWidget { 
-                        background-color: white; 
-                        border: 1px solid #ccc; 
-                        border-radius: 3px;
-                    }
-                    QListWidget:focus { 
-                        border: 2px solid #007bff;  /* Bright blue focus ring */
-                        background-color: #f8faff;  /* Very subtle blue tint */
-                        outline: none;              /* Removes Qt's default dotted outline */
-                    }
-                """)
+            QListWidget { 
+                background-color: white; 
+                border: 1px solid #ccc; 
+                border-radius: 3px;
+            }
+            QListWidget:focus { 
+                border: 2px solid #007bff;  
+                background-color: #f8faff;  
+                outline: none;              
+            }
+            QListWidget::item:selected {
+                background-color: #cce5ff;
+                border: 2px solid #007bff;
+                border-radius: 4px;
+            }
+            QListWidget::item:focus:!selected {
+                border: 2px dashed #888;
+                border-radius: 4px;
+            }
+            QListWidget::item {
+                border: 2px solid transparent; 
+                border-radius: 4px;
+            }
+        """)
 
     def dragEnterEvent(self, event):
         if isinstance(event.source(), DraggableItemList) and event.source().doc_key == self.doc_key:
@@ -51,16 +64,14 @@ class DraggableItemList(QListWidget):
     def dropEvent(self, event):
         source = event.source()
         if isinstance(source, DraggableItemList) and source.doc_key == self.doc_key:
+            # Grab EVERY selected item
             dragged_items = [item.data(Qt.ItemDataRole.UserRole) for item in source.selectedItems()]
             if not dragged_items: return
-
-            match_item = dragged_items[0]
 
             event.setDropAction(Qt.DropAction.IgnoreAction)
             event.accept()
 
-            self.requestDragRoute.emit(match_item, source, self)
-
+            self.requestDragRoute.emit(dragged_items, source, self)
         else:
             event.ignore()
 
@@ -68,23 +79,27 @@ class DraggableItemList(QListWidget):
         selected_items = self.selectedItems()
         current_row = self.currentRow()
 
-        if selected_items and (event.modifiers() & Qt.KeyboardModifier.ControlModifier):
-            current_item = selected_items[0].data(Qt.ItemDataRole.UserRole)
+        # --- MULTI-MOVE VIA KEYBOARD (Now uses ALT instead of CTRL) ---
+        if selected_items and (event.modifiers() & Qt.KeyboardModifier.AltModifier):
+            items_to_move = [item.data(Qt.ItemDataRole.UserRole) for item in selected_items]
+
             if event.key() == Qt.Key.Key_Up:
-                self.moveToNeighbor.emit(current_item, "up")
+                self.moveToNeighbor.emit(items_to_move, "up")
                 return
             elif event.key() == Qt.Key.Key_Down:
-                self.moveToNeighbor.emit(current_item, "down")
+                self.moveToNeighbor.emit(items_to_move, "down")
                 return
 
+        # --- MULTI-DELETE VIA KEYBOARD ---
         if selected_items and event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
             saved_row = current_row
+            items_to_eject = [item.data(Qt.ItemDataRole.UserRole) for item in selected_items]
 
-            current_item = selected_items[0].data(Qt.ItemDataRole.UserRole)
+            # Fire the eject signal for every selected item
+            for current_item in items_to_eject:
+                self.itemEjected.emit(current_item)
 
-            self.itemEjected.emit(current_item)
-
-            # Restore focus
+            # Restore focus safely
             if self.count() > 0:
                 next_row = min(saved_row, self.count() - 1)
                 self.setCurrentRow(next_row)
