@@ -1,49 +1,11 @@
-import math
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QPushButton, QLabel
-from PySide6.QtCore import Qt, Signal, QTimer
-from PySide6.QtGui import QShortcut, QKeySequence
+from PySide6.QtCore import Qt, Signal, QSize, QTimer
+from PySide6.QtGui import QShortcut, QKeySequence, QIcon
 
-# UI Imports
+from src.UI.Utils import get_asset_path
 from src.UI.ManualMatching.Cluster import Cluster
 from src.UI.ManualMatching.Unmatched import Unmatched
-# Data Model Imports
 from src.UI.DataProcessing.MatchingEngine import MatchingEngine
-
-
-class PagedScrollArea(QScrollArea):
-    """A custom scroll area that waits for the user to stop scrolling, then mathematically snaps to the nearest column."""
-
-    def __init__(self):
-        super().__init__()
-        self.setWidgetResizable(True)
-        self.setStyleSheet("QScrollArea { border: none; background: transparent; }")
-        self.snap_step = 400
-
-        # Debounce timer to wait for trackpad/mouse wheel to stop
-        self.snap_timer = QTimer()
-        self.snap_timer.setSingleShot(True)
-        self.snap_timer.timeout.connect(self.snap_to_column)
-        self.horizontalScrollBar().valueChanged.connect(self.on_scroll)
-
-    def on_scroll(self):
-        # Start a 250ms countdown every time the scrollbar moves.
-        h_bar = self.horizontalScrollBar()
-        if 0 < h_bar.value() < h_bar.maximum():
-            self.snap_timer.start(250)
-
-    def snap_to_column(self):
-        if self.snap_step <= 0: return
-        h_bar = self.horizontalScrollBar()
-        current_val = h_bar.value()
-
-        # Find nearest exact column index
-        target_val = round(current_val / self.snap_step) * self.snap_step
-
-        # Clamp the value so we don't try to snap past the end of the scroll area
-        target_val = max(0, min(target_val, h_bar.maximum()))
-
-        if abs(current_val - target_val) > 2:
-            h_bar.setValue(target_val)
 
 
 class ComparisonTab(QWidget):
@@ -55,51 +17,89 @@ class ComparisonTab(QWidget):
         self.engine = MatchingEngine()
         self._wire_engine_signals()
 
-        self.cluster_widgets = {}  # Map cluster_id to physical UI widgets
+        self.cluster_widgets = {}
         self.parking_lot_widget = None
+
+        # --- CAROUSEL STATE ---
+        self.current_start_index = 0
+        self.visible_columns_count = 2
 
         # --- 2. SETUP UI LAYOUT ---
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
 
-        # Header Scroll Area
-        self.header_row_layout = QHBoxLayout()
-        self.header_row_layout.setContentsMargins(0, 5, 20, 0)
-        self.header_scroll = QScrollArea()
-        self.header_scroll.setWidgetResizable(True)
-        self.header_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.header_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.header_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
-        self.header_scroll.setFixedHeight(45)
+        # --- NAVIGATION BUTTON STYLING ---
+        nav_btn_style = """
+            QPushButton {
+                background-color: #f0f0f0;
+                border: none;
+                border-radius: 10px; /* Half of the 24px width to make a pill shape */
+            }
+            QPushButton:hover {
+                background-color: #dcdcdc;
+            }
+            QPushButton:disabled {
+                background-color: transparent;
+            }
+        """
 
-        self.column_headers_container = QWidget()
-        self.column_headers_layout = QHBoxLayout(self.column_headers_container)
-        self.column_headers_layout.setContentsMargins(25, 0, 25, 0)
-        self.header_scroll.setWidget(self.column_headers_container)
-        self.header_row_layout.addWidget(self.header_scroll, stretch=1)
-        self.layout.addLayout(self.header_row_layout)
+        self.prev_btn = QPushButton()
+        self.prev_btn.setIcon(QIcon(get_asset_path("assets/chevron-left.svg")))
+        self.prev_btn.setIconSize(QSize(20, 20))
+        self.prev_btn.setFixedSize(20, 40)
+        self.prev_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.prev_btn.setStyleSheet(nav_btn_style)
+        self.prev_btn.clicked.connect(self.page_prev)
 
-        # Main Workspace Carousel
-        self.scroll_area = PagedScrollArea()
+        self.next_btn = QPushButton()
+        self.next_btn.setIcon(QIcon(get_asset_path("assets/chevron-right.svg")))
+        self.next_btn.setIconSize(QSize(20, 20))
+        self.next_btn.setFixedSize(20, 40)
+        self.next_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.next_btn.setStyleSheet(nav_btn_style)
+        self.next_btn.clicked.connect(self.page_next)
+
+        # --- WORKSPACE CONTAINER (Headers + Scroll Area) ---
+        self.workspace_layout = QVBoxLayout()
+        self.workspace_layout.setContentsMargins(0, 10, 0, 0)
+
+        # Headers
+        self.column_headers_layout = QHBoxLayout()
+        self.column_headers_layout.setContentsMargins(0, 0, 0, 0)
+        self.column_headers_layout.setSpacing(10)
+        self.workspace_layout.addLayout(self.column_headers_layout)
+
+        # Scroll Area
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+
         self.cluster_container = QWidget()
         self.cluster_layout = QVBoxLayout(self.cluster_container)
         self.cluster_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self.cluster_layout.setContentsMargins(25, 0, 25, 0)
+        self.cluster_layout.setContentsMargins(0, 10, 0, 0)
         self.cluster_layout.setSpacing(10)
 
         self.scroll_area.setWidget(self.cluster_container)
-        self.layout.addWidget(self.scroll_area)
+        self.workspace_layout.addWidget(self.scroll_area)
 
-        # Sync scrolling
-        self.scroll_area.horizontalScrollBar().valueChanged.connect(
-            self.header_scroll.horizontalScrollBar().setValue
-        )
+        # --- CAROUSEL LAYOUT ---
+        # [ Prev Btn ] [ Workspace (Headers + Clusters) ] [ Next Btn ]
+        self.carousel_layout = QHBoxLayout()
+        self.carousel_layout.setContentsMargins(5, 0, 5, 0)
+        self.carousel_layout.setSpacing(5)
 
-        # Add Cluster Button
+        self.carousel_layout.addWidget(self.prev_btn, alignment=Qt.AlignmentFlag.AlignVCenter)
+        self.carousel_layout.addLayout(self.workspace_layout, stretch=1)
+        self.carousel_layout.addWidget(self.next_btn, alignment=Qt.AlignmentFlag.AlignVCenter)
+
+        self.layout.addLayout(self.carousel_layout)
+
+        # --- BOTTOM ACTION ROW ---
         self.add_cluster_btn = QPushButton("Nieuwe cluster toevoegen")
         self.add_cluster_btn.setEnabled(False)
         self.add_cluster_btn.setStyleSheet(
-            "background-color: #007bff; color: white; font-weight: bold; border-radius: 5px; padding: 10px; margin: 10px 25px;"
+            "background-color: #007bff; color: white; font-weight: bold; border-radius: 5px; padding: 10px; margin: 10px 15px;"
         )
         self.add_cluster_btn.clicked.connect(self.engine.create_empty_cluster)
         self.layout.addWidget(self.add_cluster_btn)
@@ -109,7 +109,6 @@ class ComparisonTab(QWidget):
         self.new_cluster_shortcut.activated.connect(self.engine.create_empty_cluster)
 
     def _wire_engine_signals(self):
-        """Connects the Data Model's announcements to the UI's drawing functions."""
         self.engine.stateLoaded.connect(self._build_entire_ui)
         self.engine.clusterAdded.connect(self._create_cluster_widget)
         self.engine.clusterRemoved.connect(self._remove_cluster_widget)
@@ -119,15 +118,10 @@ class ComparisonTab(QWidget):
     # ==========================================
     # --- DATA INGRESS & EGRESS ---
     # ==========================================
-
     def populate_from_ai(self, doc_keys: list[str], clusters: list[dict], lookup: dict, unmatched_dict: dict):
-        """Called by MainWindow. We just pass this straight to the Engine."""
         self.engine.load_ai_data(doc_keys, clusters, lookup, unmatched_dict)
 
     def gather_current_state(self):
-        """No more UI scraping! We just ask the Engine for the data."""
-        # We will add an export_state() method to the Engine later,
-        # but for now this replaces your old scrape logic perfectly.
         clusters_data = []
         for c_id, c_data in self.engine.clusters.items():
             clusters_data.append({
@@ -142,12 +136,52 @@ class ComparisonTab(QWidget):
         return clusters_data, unmatched_items
 
     # ==========================================
+    # --- CAROUSEL NAVIGATION LOGIC ---
+    # ==========================================
+    def page_prev(self):
+        if self.current_start_index > 0:
+            self.current_start_index -= 1
+            self.update_carousel_view()
+
+    def page_next(self):
+        if self.current_start_index < len(self.engine.doc_keys) - self.visible_columns_count:
+            self.current_start_index += 1
+            self.update_carousel_view()
+
+    def update_carousel_view(self):
+        """Hides and shows elements based on the current window of keys."""
+        if not self.engine.doc_keys:
+            return
+
+        # Determine which keys are active right now
+        end_idx = self.current_start_index + self.visible_columns_count
+        visible_keys = self.engine.doc_keys[self.current_start_index: end_idx]
+
+        # 1. Update Navigation Button States
+        self.prev_btn.setEnabled(self.current_start_index > 0)
+        self.next_btn.setEnabled(end_idx < len(self.engine.doc_keys))
+
+        # 2. Update Header Visibility
+        for i in range(self.column_headers_layout.count()):
+            widget = self.column_headers_layout.itemAt(i).widget()
+            if widget:
+                key = self.engine.doc_keys[i]
+                widget.setVisible(key in visible_keys)
+
+        # 3. Update Cluster and Parking Lot Visibility
+        for widget in self.cluster_widgets.values():
+            widget.set_visible_columns(visible_keys)
+
+        if self.parking_lot_widget:
+            self.parking_lot_widget.set_visible_columns(visible_keys)
+
+    # ==========================================
     # --- UI RENDERING METHODS ---
     # ==========================================
-
     def _build_entire_ui(self):
         self.add_cluster_btn.setEnabled(True)
-        """Fires once when a new document is loaded."""
+        self.current_start_index = 0  # Reset carousel on new load
+
         # 1. Clear Headers
         while self.column_headers_layout.count():
             item = self.column_headers_layout.takeAt(0)
@@ -170,7 +204,7 @@ class ComparisonTab(QWidget):
         if self.parking_lot_widget:
             self.parking_lot_widget.setParent(None)
             self.parking_lot_widget.deleteLater()
-            self.parking_lot_widget = None  # Crucial to prevent ghost references
+            self.parking_lot_widget = None
 
         # 4. Build new Clusters from Engine state
         for c_id in self.engine.clusters.keys():
@@ -184,9 +218,11 @@ class ComparisonTab(QWidget):
         self.parking_lot_widget.requestNeighborMove.connect(self.handle_neighbor_move)
         self.parking_lot_widget.requestGlobalNavigation.connect(self.handle_global_navigation)
         self.parking_lot_widget.requestDragRoute.connect(self.handle_drag_drop)
+        self.parking_lot_widget.requestScrollTo.connect(self.handle_scroll_request)
 
+        # Apply the initial hide/show state
+        self.update_carousel_view()
         self.stateChanged.emit()
-        QTimer.singleShot(100, self.recalculate_column_widths)
 
     def _create_cluster_widget(self, cluster_id: int):
         widget = Cluster(cluster_id, self.engine.doc_keys)
@@ -195,12 +231,11 @@ class ComparisonTab(QWidget):
         widget.itemEjected.connect(lambda item, c_id: self.engine.move_item(item, c_id, None))
         widget.excludeToggled.connect(self.engine.toggle_exclusion)
 
-        # drag and drop
         widget.requestNeighborMove.connect(self.handle_neighbor_move)
         widget.requestGlobalNavigation.connect(self.handle_global_navigation)
         widget.requestDragRoute.connect(self.handle_drag_drop)
+        widget.requestScrollTo.connect(self.handle_scroll_request)
 
-        # Inject above parking lot
         if self.parking_lot_widget:
             idx = self.cluster_layout.indexOf(self.parking_lot_widget)
             self.cluster_layout.insertWidget(idx, widget)
@@ -209,6 +244,9 @@ class ComparisonTab(QWidget):
 
         self.cluster_widgets[cluster_id] = widget
         self._update_cluster_widget(cluster_id)
+
+        # Ensure new cluster respects the current carousel window
+        self.update_carousel_view()
 
     def _remove_cluster_widget(self, cluster_id: int):
         if cluster_id in self.cluster_widgets:
@@ -228,79 +266,16 @@ class ComparisonTab(QWidget):
             self.parking_lot_widget.update_ui(self.engine.unmatched)
         self.stateChanged.emit()
 
-    # --- 3. THE MATHEMATICAL RESIZER (Keep exactly as we fixed it!) ---
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        QTimer.singleShot(50, self.recalculate_column_widths)
-
-    def recalculate_column_widths(self):
-        if not self.engine.doc_keys: return
-        viewport_width = self.scroll_area.viewport().width()
-
-        left_margin, _, right_margin, _ = self.cluster_layout.getContentsMargins()
-
-        # ---> PERFECT ALIGNMENT: Read the exact border thickness of the Cluster Frame <---
-        frame_offset = 0
-        if self.cluster_widgets:
-            frame_offset = list(self.cluster_widgets.values())[0].frameWidth()
-        elif self.parking_lot_widget:
-            frame_offset = self.parking_lot_widget.frameWidth()
-
-        # Offset the headers perfectly to match the list's interior position
-        self.column_headers_layout.setContentsMargins(left_margin + frame_offset, 0, right_margin + frame_offset, 0)
-
-        # Include the frame borders in the dead space calculations
-        safe_dead_space = left_margin + right_margin + (frame_offset * 2)
-
-        spacing = self.column_headers_layout.spacing()
-        if spacing < 0: spacing = 10
-
-        min_col_width = 330
-        available_for_lists = viewport_width - safe_dead_space
-        visible_cols = max(1, available_for_lists // min_col_width)
-        visible_cols = min(visible_cols, len(self.engine.doc_keys))
-
-        total_gaps = (visible_cols - 1) * spacing
-
-        # ---> THE OVERFLOW FIX: Use floor instead of ceil so we never wrap onto a new line! <---
-        exact_col_width = math.floor((available_for_lists - total_gaps) / visible_cols)
-
-        snap_step = exact_col_width + spacing
-        self.scroll_area.snap_step = snap_step
-        self.scroll_area.horizontalScrollBar().setSingleStep(snap_step)
-
-        # Apply width to headers
-        self.column_headers_layout.setSpacing(spacing)
-        for i in range(self.column_headers_layout.count()):
-            widget = self.column_headers_layout.itemAt(i).widget()
-            if widget: widget.setFixedWidth(exact_col_width)
-
-        # Apply width to clusters
-        all_clusters = list(self.cluster_widgets.values())
-        if self.parking_lot_widget:
-            all_clusters.append(self.parking_lot_widget)
-
-        for widget in all_clusters:
-            lists_layout = widget.lists_widget.layout()
-            lists_layout.setSpacing(spacing)
-            lists_layout.setContentsMargins(0, 0, 0, 0)
-
-            for lst in widget.lists.values():
-                lst.setFixedWidth(exact_col_width)
-
     # ==========================================
     # --- KEYBOARD SHORTCUT ROUTING ---
     # ==========================================
-
     def handle_neighbor_move(self, source_widget, match_item, direction):
-        """Fired by Ctrl+Up / Ctrl+Down to move items between clusters."""
         idx = self.cluster_layout.indexOf(source_widget)
         target_idx = idx - 1 if direction == "up" else idx + 1
 
         if 0 <= target_idx < self.cluster_layout.count():
             target_widget = self.cluster_layout.itemAt(target_idx).widget()
 
-            # Skip over the 'Add Cluster' button if we hit it
             if isinstance(target_widget, QPushButton):
                 target_idx = target_idx - 1 if direction == "up" else target_idx + 1
                 if 0 <= target_idx < self.cluster_layout.count():
@@ -308,40 +283,70 @@ class ComparisonTab(QWidget):
                 else:
                     return
 
-            # Translate widget objects into Engine IDs
             source_id = getattr(source_widget, 'cluster_id', None)
             target_id = getattr(target_widget, 'cluster_id', None)
 
-            # Let the Engine do the math!
             self.engine.move_item(match_item, source_id, target_id)
 
-            # Move the visual cursor to follow the item
             if hasattr(target_widget, 'focus_on_item'):
                 target_widget.focus_on_item(match_item)
 
-    def handle_global_navigation(self, source_widget, doc_key, direction):
-        """Fired by Up/Down arrows to jump borders between clusters."""
-        idx = self.cluster_layout.indexOf(source_widget)
-        target_idx = idx - 1 if direction == "up" else idx + 1
+    def handle_global_navigation(self, source_widget, key, direction):
+        if direction in ("left", "right"):
+            # --- HORIZONTAL NAVIGATION (Carousel Auto-Scrolling) ---
+            target_idx = self.engine.doc_keys.index(key)
+            visible_end = self.current_start_index + self.visible_columns_count - 1
 
-        if 0 <= target_idx < self.cluster_layout.count():
-            target_widget = self.cluster_layout.itemAt(target_idx).widget()
+            # Shift window left if we moved before the current start
+            if target_idx < self.current_start_index:
+                self.current_start_index = target_idx
+                self.update_carousel_view()
 
-            if isinstance(target_widget, QPushButton):
-                target_idx = target_idx - 1 if direction == "up" else target_idx + 1
-                if 0 <= target_idx < self.cluster_layout.count():
-                    target_widget = self.cluster_layout.itemAt(target_idx).widget()
+            # Shift window right if we moved past the current end
+            elif target_idx > visible_end:
+                self.current_start_index = target_idx - self.visible_columns_count + 1
+                self.update_carousel_view()
+
+        else:
+            # --- VERTICAL NAVIGATION (Jumping between Clusters) ---
+            idx = self.cluster_layout.indexOf(source_widget)
+            target_idx = idx - 1 if direction == "up" else idx + 1
+
+            if 0 <= target_idx < self.cluster_layout.count():
+                target_widget = self.cluster_layout.itemAt(target_idx).widget()
+
+                # Skip over the "Nieuwe cluster toevoegen" button if it's in the layout
+                if isinstance(target_widget, QPushButton):
+                    target_idx = target_idx - 1 if direction == "up" else target_idx + 1
+                    if 0 <= target_idx < self.cluster_layout.count():
+                        target_widget = self.cluster_layout.itemAt(target_idx).widget()
+                    else:
+                        return
+
+                target_list = target_widget.lists[key]
+                target_list.setFocus()
+
+                # Keep the cursor at the bottom if moving up, or top if moving down
+                if target_list.count() > 0:
+                    target_row = target_list.count() - 1 if direction == "up" else 0
+                    target_list.setCurrentRow(target_row)
+
+                    # --- NEW: Ensure the newly focused row is visible ---
+                    item = target_list.item(target_row)
+                    item_widget = target_list.itemWidget(item)
+                    if item_widget:
+                        self.handle_scroll_request(item_widget)
+                    else:
+                        self.handle_scroll_request(target_widget)
                 else:
-                    return
+                    # If jumping into an empty list, just scroll to the cluster itself
+                    self.handle_scroll_request(target_widget)
 
-            target_list = target_widget.lists[doc_key]
-            target_list.setFocus()
-
-            if target_list.count() > 0:
-                target_list.setCurrentRow(target_list.count() - 1 if direction == "up" else 0)
+    def handle_scroll_request(self, target_widget):
+        """Forces the QScrollArea to bring the specific widget/row into view."""
+        QTimer.singleShot(0, lambda: self.scroll_area.ensureWidgetVisible(target_widget, xmargin=0, ymargin=50))
 
     def handle_drag_drop(self, match_item, source_list, target_list):
-        """Translates a visual mouse drop into an Engine movement."""
         source_id = None
         target_id = None
 
@@ -349,17 +354,14 @@ class ComparisonTab(QWidget):
         if self.parking_lot_widget:
             all_clusters.append(self.parking_lot_widget)
 
-        # Figure out which cluster ID owns the source and target lists
         for widget in all_clusters:
             if source_list in widget.lists.values():
                 source_id = getattr(widget, 'cluster_id', None)
             if target_list in widget.lists.values():
                 target_id = getattr(widget, 'cluster_id', None)
 
-        # Send it to the engine! (The engine handles UI redraw automatically)
         self.engine.move_item(match_item, source_id, target_id)
 
-        # Focus the item in its new home
         for widget in all_clusters:
             if getattr(widget, 'cluster_id', None) == target_id:
                 if hasattr(widget, 'focus_on_item'):

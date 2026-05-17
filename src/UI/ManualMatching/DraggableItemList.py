@@ -10,6 +10,7 @@ class DraggableItemList(QListWidget):
     moveToNeighbor = Signal(object, str)
     navigateBoundary = Signal(str, str)  # contract id, direction ('up', 'down', 'left', 'right')
     requestDragRoute = Signal(object, object, object)  # match_item, source_list, target_list
+    requestScrollTo = Signal(object)
 
     def __init__(self, doc_key: str, all_keys: list[str]):
         super().__init__()
@@ -22,7 +23,18 @@ class DraggableItemList(QListWidget):
         # self.setMinimumWidth(480)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setResizeMode(QListWidget.ResizeMode.Adjust)
-        self.setStyleSheet("QListWidget { background-color: white; border: 1px solid #ccc; }")
+        self.setStyleSheet("""
+                    QListWidget { 
+                        background-color: white; 
+                        border: 1px solid #ccc; 
+                        border-radius: 3px;
+                    }
+                    QListWidget:focus { 
+                        border: 2px solid #007bff;  /* Bright blue focus ring */
+                        background-color: #f8faff;  /* Very subtle blue tint */
+                        outline: none;              /* Removes Qt's default dotted outline */
+                    }
+                """)
 
     def dragEnterEvent(self, event):
         if isinstance(event.source(), DraggableItemList) and event.source().doc_key == self.doc_key:
@@ -44,12 +56,9 @@ class DraggableItemList(QListWidget):
 
             match_item = dragged_items[0]
 
-            # ---> THE FIX: Prevent Qt from duplicating or moving the C++ item. <---
-            # We want our data Engine to handle this!
             event.setDropAction(Qt.DropAction.IgnoreAction)
             event.accept()
 
-            # Tell the routing layer what we want to do (Move item from Source to Self)
             self.requestDragRoute.emit(match_item, source, self)
 
         else:
@@ -91,17 +100,22 @@ class DraggableItemList(QListWidget):
         elif event.key() == Qt.Key.Key_Down and (current_row == self.count() - 1 or current_row == -1):
             self.navigateBoundary.emit(self.doc_key, "down")
             return
-
-        # Dynamically jump left if we aren't the first list
         elif event.key() == Qt.Key.Key_Left and idx > 0:
             self.navigateBoundary.emit(self.doc_key, "left")
             return
-        # Dynamically jump right if we aren't the last list
         elif event.key() == Qt.Key.Key_Right and idx < len(self.all_keys) - 1:
             self.navigateBoundary.emit(self.doc_key, "right")
             return
 
         super().keyPressEvent(event)
+
+        if event.key() in (Qt.Key.Key_Up, Qt.Key.Key_Down):
+            new_row = self.currentRow()
+            if new_row >= 0:
+                item = self.item(new_row)
+                item_widget = self.itemWidget(item)
+                if item_widget:
+                    self.requestScrollTo.emit(item_widget)
 
     def focusOutEvent(self, event):
         """Clears the visual selection when the user navigates away from this list."""

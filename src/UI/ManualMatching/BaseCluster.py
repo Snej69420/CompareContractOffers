@@ -8,6 +8,7 @@ class BaseCluster(QFrame):
     requestNeighborMove = Signal(object, object, str)
     requestGlobalNavigation = Signal(object, str, str)
     requestDragRoute = Signal(object, object, object)
+    requestScrollTo = Signal(object)
 
     def __init__(self, title_text: str, doc_keys: list[str]):
         super().__init__()
@@ -49,6 +50,7 @@ class BaseCluster(QFrame):
             lst.moveToNeighbor.connect(self._emit_neighbor_move)
             lst.navigateBoundary.connect(self.handle_boundary_navigation)
             lst.requestDragRoute.connect(self.requestDragRoute.emit)
+            lst.requestScrollTo.connect(self.requestScrollTo.emit)
 
             lists_layout.addWidget(lst)
             self.lists[key] = lst
@@ -62,24 +64,25 @@ class BaseCluster(QFrame):
     def handle_boundary_navigation(self, doc_key, direction):
         idx = self.doc_keys.index(doc_key)
 
-        if direction == "left" and idx > 0:
-            target_list = self.lists[self.doc_keys[idx - 1]]
-            source_list = self.lists[doc_key]
+        if direction in ("left", "right"):
+            target_idx = idx - 1 if direction == "left" else idx + 1
 
-            target_list.setFocus()
-            if target_list.count() > 0:
-                row = min(source_list.currentRow(), target_list.count() - 1)
-                target_list.setCurrentRow(max(0, row))
+            if 0 <= target_idx < len(self.doc_keys):
+                target_key = self.doc_keys[target_idx]
 
-        elif direction == "right" and idx < len(self.doc_keys) - 1:
-            target_list = self.lists[self.doc_keys[idx + 1]]
-            source_list = self.lists[doc_key]
+                # Alert the Tab so it can shift the carousel if needed
+                self.requestGlobalNavigation.emit(self, target_key, direction)
 
-            target_list.setFocus()
-            if target_list.count() > 0:
-                row = min(source_list.currentRow(), target_list.count() - 1)
-                target_list.setCurrentRow(max(0, row))
+                # Now apply the focus locally
+                target_list = self.lists[target_key]
+                source_list = self.lists[doc_key]
+
+                target_list.setFocus()
+                if target_list.count() > 0:
+                    row = min(max(0, source_list.currentRow()), target_list.count() - 1)
+                    target_list.setCurrentRow(row)
         else:
+            # Vertical navigation (Up/Down out of this cluster)
             self.requestGlobalNavigation.emit(self, doc_key, direction)
 
     def focus_on_item(self, match_item):
@@ -117,3 +120,8 @@ class BaseCluster(QFrame):
 
         for lst in self.lists.values():
             lst.setFixedHeight(target_height)
+
+    def set_visible_columns(self, visible_keys: list[str]):
+        """Hides or shows columns based on the current active 'window'."""
+        for key, lst in self.lists.items():
+            lst.setVisible(key in visible_keys)
