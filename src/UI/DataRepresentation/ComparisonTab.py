@@ -402,7 +402,6 @@ class ComparisonTab(QWidget):
                     target_row = target_list.count() - 1 if direction == "up" else 0
                     target_list.setCurrentRow(target_row)
 
-                    # --- NEW: Ensure the newly focused row is visible ---
                     item = target_list.item(target_row)
                     item_widget = target_list.itemWidget(item)
                     if item_widget:

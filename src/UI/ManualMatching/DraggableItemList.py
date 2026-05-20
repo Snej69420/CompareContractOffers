@@ -1,21 +1,31 @@
-from PySide6.QtWidgets import QListWidget, QListWidgetItem
-from PySide6.QtCore import Qt, Signal, QSize
+from PySide6.QtWidgets import QListWidget, QListWidgetItem, QScrollArea, QApplication
+from PySide6.QtCore import Qt, Signal, QSize, QTimer
+from PySide6.QtGui import QCursor
 
 from src.UI.ManualMatching.MatchItem import MatchItem
 from src.UI.ManualMatching.ProductItem import ProductItem
+
 
 class DraggableItemList(QListWidget):
     itemDropped = Signal()
     itemEjected = Signal(object)
     moveToNeighbor = Signal(object, str)
-    navigateBoundary = Signal(str, str)  # contract id, direction ('up', 'down', 'left', 'right')
-    requestDragRoute = Signal(object, object, object)  # match_item, source_list, target_list
+    navigateBoundary = Signal(str, str)
+    requestDragRoute = Signal(object, object, object)
     requestScrollTo = Signal(object)
+
+    shared_scroll_timer = None
+    active_scroll_area = None
 
     def __init__(self, doc_key: str, all_keys: list[str]):
         super().__init__()
         self.doc_key = doc_key
         self.all_keys = all_keys
+
+        # Initialize the static timer once for all lists
+        if DraggableItemList.shared_scroll_timer is None:
+            DraggableItemList.shared_scroll_timer = QTimer()
+            DraggableItemList.shared_scroll_timer.timeout.connect(DraggableItemList._handle_shared_auto_scroll)
 
         self.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
         self.setDragDropMode(QListWidget.DragDropMode.DragDrop)
@@ -53,6 +63,61 @@ class DraggableItemList(QListWidget):
         super().resizeEvent(event)
         self.doItemsLayout()
 
+    # ==========================================
+    # --- DRAG AUTO-SCROLL LOGIC ---
+    # ==========================================
+    def _get_parent_scroll_area(self) -> QScrollArea:
+        parent = self.parent()
+        while parent:
+            if isinstance(parent, QScrollArea):
+                return parent
+            parent = parent.parent()
+        return None
+
+    @staticmethod
+    def _handle_shared_auto_scroll():
+        """A global tracker that evaluates the cursor completely independent of list hover states."""
+        scroll_area = DraggableItemList.active_scroll_area
+        if not scroll_area:
+            DraggableItemList.shared_scroll_timer.stop()
+            return
+
+        # Stop when item unselected
+        if not (QApplication.mouseButtons() & Qt.MouseButton.LeftButton):
+            DraggableItemList.shared_scroll_timer.stop()
+            return
+
+        viewport = scroll_area.viewport()
+        if not viewport:
+            return
+
+        global_pos = QCursor.pos()
+        local_pos = viewport.mapFromGlobal(global_pos)
+        y = local_pos.y()
+        scroll_zone = 100
+
+        if local_pos.x() < -100 or local_pos.x() > viewport.width() + 100:
+            DraggableItemList.shared_scroll_timer.stop()
+            return
+
+        vbar = scroll_area.verticalScrollBar()
+
+        if y < scroll_zone:
+            # Dynamic speed: Scales from 3px up to 25px per tick based on closeness to edge
+            speed = int(((scroll_zone - y) / scroll_zone) * 25)
+            vbar.setValue(vbar.value() - max(3, speed))
+
+        elif y > viewport.height() - scroll_zone:
+            speed = int(((y - (viewport.height() - scroll_zone)) / scroll_zone) * 25)
+            vbar.setValue(vbar.value() + max(3, speed))
+
+        else:
+            # Mouse is resting in the safe middle zone
+            DraggableItemList.shared_scroll_timer.stop()
+
+    # ==========================================
+    # --- DRAG & DROP EVENTS ---
+    # ==========================================
     def dragEnterEvent(self, event):
         if isinstance(event.source(), DraggableItemList) and event.source().doc_key == self.doc_key:
             super().dragEnterEvent(event)
@@ -62,10 +127,21 @@ class DraggableItemList(QListWidget):
     def dragMoveEvent(self, event):
         if isinstance(event.source(), DraggableItemList) and event.source().doc_key == self.doc_key:
             super().dragMoveEvent(event)
+
+            # Ensure the master timer is awake while we drag
+            DraggableItemList.active_scroll_area = self._get_parent_scroll_area()
+            if DraggableItemList.active_scroll_area and not DraggableItemList.shared_scroll_timer.isActive():
+                DraggableItemList.shared_scroll_timer.start(20)  # 20ms = Smooth 50fps scrolling
         else:
             event.ignore()
 
+    def dragLeaveEvent(self, event):
+        super().dragLeaveEvent(event)
+
     def dropEvent(self, event):
+        if DraggableItemList.shared_scroll_timer:
+            DraggableItemList.shared_scroll_timer.stop()
+
         source = event.source()
         if isinstance(source, DraggableItemList) and source.doc_key == self.doc_key:
             # Grab EVERY selected item
@@ -79,6 +155,9 @@ class DraggableItemList(QListWidget):
         else:
             event.ignore()
 
+    # ==========================================
+    # --- KEYBOARD & FOCUS LOGIC ---
+    # ==========================================
     def keyPressEvent(self, event):
         selected_items = self.selectedItems()
         current_row = self.currentRow()
@@ -161,7 +240,6 @@ class DraggableItemList(QListWidget):
             li.setSizeHint(custom_widget.sizeHint())
             li.setData(Qt.ItemDataRole.UserRole, match_item)
 
-            # --- THE NEW TOOLTIP ---
             # Shows the full uncut name + the fixed confidence score
             full_name = match_item.name
             li.setToolTip(f"{full_name}\n\nZekerheid: {match_item.current_score:.0%}\nSleep om aan te passen.")
