@@ -17,6 +17,9 @@ class Cluster(BaseCluster):
         # Pass the dynamic keys up to the BaseCluster
         super().__init__(f"Cluster {cluster_id}", doc_keys)
 
+        self.setObjectName("ClusterWidget")
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
         self.cluster_id = cluster_id
         self.is_approved = False
 
@@ -42,7 +45,6 @@ class Cluster(BaseCluster):
         self.excluded_icon = QIcon(get_asset_path("assets/eye-off.svg"))
         self.included_icon = QIcon(get_asset_path("assets/eye.svg"))
 
-        # 2. Update the exclude_btn
         self.exclude_btn = QPushButton()
         self.exclude_btn.setIcon(self.included_icon)
         self.exclude_btn.setToolTip("Item opgenomen in vergelijking")
@@ -76,6 +78,14 @@ class Cluster(BaseCluster):
         self.backspace_shortcut = QShortcut(QKeySequence("Shift+Backspace"), self)
         self.backspace_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self.backspace_shortcut.activated.connect(self.request_removal)
+
+        self.confirm_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Return), self)
+        self.confirm_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self.confirm_shortcut.activated.connect(self.toggle_approve)
+
+        self.enter_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Enter), self)
+        self.enter_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self.enter_shortcut.activated.connect(self.toggle_approve)
 
     def on_items_changed(self):
         """Overrides the BaseCluster drop handler to alert the parent that a drop happened."""
@@ -125,24 +135,51 @@ class Cluster(BaseCluster):
         self.adjust_list_heights(max_visible_rows=min(max_items, 6))
 
     def toggle_approve(self):
-        """Pure UI State - no data changes here."""
         self.is_approved = not self.is_approved
         if self.is_approved:
             self.lists_widget.setVisible(False)
             self.approve_btn.setText("Aanpassen")
             self.approve_btn.setIcon(self.edit_icon)
             self.icon_label.setIcon(self.closed_icon)
-            self.setStyleSheet(
-                "ClusterWidget { background-color: #e2f0e5; border: 1px solid #c3e6cb; border-radius: 5px; }")
+
+            self.setStyleSheet("""
+                #ClusterWidget { background-color: #e2f0e5; border: 1px solid #c3e6cb; border-radius: 5px; }
+                #ClusterWidget:focus { border: 2px solid #28a745; background-color: #d4edda; outline: none; }
+            """)
+
+            self.setFocus()
         else:
             self.lists_widget.setVisible(True)
             self.approve_btn.setText("Bevestigen")
             self.approve_btn.setIcon(self.approve_icon)
             self.icon_label.setIcon(self.open_icon)
-            self.setStyleSheet(
-                "ClusterWidget { background-color: #f9f9f9; border: 1px solid #ddd; border-radius: 5px; }")
+
+            self.setStyleSheet("""
+                #ClusterWidget { background-color: #f9f9f9; border: 1px solid #ddd; border-radius: 5px; }
+                #ClusterWidget:focus { border: 2px solid #007bff; outline: none; }
+            """)
+
+            # Tell the parent tab to drop the cursor back into the correct list
+            self.requestGlobalNavigation.emit(self, "", "open")
 
     def mouseDoubleClickEvent(self, event):
         if self.is_approved:
             self.toggle_approve()
         super().mouseDoubleClickEvent(event)
+
+    def keyPressEvent(self, event):
+        """Catches arrow keys when the Cluster is confirmed and focused as a whole block."""
+        if self.is_approved:
+            if event.key() == Qt.Key.Key_Up:
+                self.requestGlobalNavigation.emit(self, "", "up")
+                return
+            elif event.key() == Qt.Key.Key_Down:
+                self.requestGlobalNavigation.emit(self, "", "down")
+                return
+            elif event.key() == Qt.Key.Key_Left:
+                self.requestGlobalNavigation.emit(self, "", "left_from_cluster")
+                return
+            elif event.key() == Qt.Key.Key_Right:
+                self.requestGlobalNavigation.emit(self, "", "right_from_cluster")
+                return
+        super().keyPressEvent(event)

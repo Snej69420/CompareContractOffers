@@ -115,14 +115,17 @@ class BaseCluster(QFrame):
             target_list = self.lists[match_items[0].doc_key]
             target_list.clearSelection()
 
+            first_item_widget = None
             first_row = -1
 
             for match_item in match_items:
                 for i in range(target_list.count()):
-                    if target_list.item(i).data(Qt.ItemDataRole.UserRole) is match_item:
-                        target_list.item(i).setSelected(True)
+                    li = target_list.item(i)
+                    if li.data(Qt.ItemDataRole.UserRole) is match_item:
+                        li.setSelected(True)
                         if first_row == -1:
                             first_row = i
+                            first_item_widget = target_list.itemWidget(li)
                         break
 
             if first_row != -1:
@@ -131,6 +134,9 @@ class BaseCluster(QFrame):
                     index,
                     QItemSelectionModel.SelectionFlag.NoUpdate
                 )
+
+                if first_item_widget:
+                    self.requestScrollTo.emit(first_item_widget)
 
             target_list.setFocus()
 

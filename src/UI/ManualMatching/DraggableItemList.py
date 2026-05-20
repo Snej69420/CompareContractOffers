@@ -30,8 +30,8 @@ class DraggableItemList(QListWidget):
                 border-radius: 3px;
             }
             QListWidget:focus { 
-                border: 2px solid #007bff;  
-                background-color: #f8faff;  
+                border: 2px solid #64748b;  
+                background-color: #f8fafc;  
                 outline: none;              
             }
             QListWidget::item:selected {
@@ -48,6 +48,10 @@ class DraggableItemList(QListWidget):
                 border-radius: 4px;
             }
         """)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.doItemsLayout()
 
     def dragEnterEvent(self, event):
         if isinstance(event.source(), DraggableItemList) and event.source().doc_key == self.doc_key:

@@ -13,19 +13,19 @@ class ComparisonTab(QWidget):
 
     def __init__(self):
         super().__init__()
-        # --- 1. INITIALIZE THE DATA ENGINE ---
         self.engine = MatchingEngine()
         self._wire_engine_signals()
 
         self.cluster_widgets = {}
         self.parking_lot_widget = None
+        self.active_column_key = ""
 
         # --- CAROUSEL STATE ---
         self.current_start_index = 0
         self.visible_columns_count = 2
         self.ideal_column_width = 512
 
-        # --- 2. SETUP UI LAYOUT ---
+        # --- SETUP UI LAYOUT ---
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
 
@@ -221,7 +221,9 @@ class ComparisonTab(QWidget):
         self.parking_lot_widget.requestDragRoute.connect(self.handle_drag_drop)
         self.parking_lot_widget.requestScrollTo.connect(self.handle_scroll_request)
 
-        # Apply the initial hide/show state
+        if self.engine.doc_keys:
+            self.active_column_key = self.engine.doc_keys[0]
+
         self.update_carousel_view()
         self.stateChanged.emit()
 
@@ -299,18 +301,29 @@ class ComparisonTab(QWidget):
     # ==========================================
     def handle_neighbor_move(self, source_widget, match_items, direction):
         idx = self.cluster_layout.indexOf(source_widget)
-        target_idx = idx - 1 if direction == "up" else idx + 1
 
-        if 0 <= target_idx < self.cluster_layout.count():
-            target_widget = self.cluster_layout.itemAt(target_idx).widget()
+        target_widget = None
+        step = -1 if direction == "up" else 1
+        current_search_idx = idx + step
 
-            if isinstance(target_widget, QPushButton):
-                target_idx = target_idx - 1 if direction == "up" else target_idx + 1
-                if 0 <= target_idx < self.cluster_layout.count():
-                    target_widget = self.cluster_layout.itemAt(target_idx).widget()
-                else:
-                    return
+        while 0 <= current_search_idx < self.cluster_layout.count():
+            potential_widget = self.cluster_layout.itemAt(current_search_idx).widget()
 
+            # Skip the "Add Cluster" button
+            if isinstance(potential_widget, QPushButton):
+                current_search_idx += step
+                continue
+
+            # Check if it's an approved cluster
+            if isinstance(potential_widget, Cluster) and potential_widget.is_approved:
+                current_search_idx += step
+                continue
+
+            # If we found a non-approved cluster or the Unmatched/ParkingLot, we stop
+            target_widget = potential_widget
+            break
+
+        if target_widget:
             source_id = getattr(source_widget, 'cluster_id', None)
             target_id = getattr(target_widget, 'cluster_id', None)
 
@@ -323,8 +336,30 @@ class ComparisonTab(QWidget):
                 target_widget.select_items(match_items)
 
     def handle_global_navigation(self, source_widget, key, direction):
-        if direction in ("left", "right"):
-            # --- HORIZONTAL NAVIGATION (Carousel Auto-Scrolling) ---
+        # 1. Update Column Memory (Fallback to memory if the signal sent "" from an approved cluster)
+        if key:
+            self.active_column_key = key
+        else:
+            key = self.active_column_key
+
+        # 2. Handle Re-Opening a Cluster
+        if direction == "open":
+            if key and key in source_widget.lists:
+                source_widget.lists[key].setFocus()
+            return
+
+        # 3. Handle Horizontal Navigation
+        if direction in ("left", "right", "left_from_cluster", "right_from_cluster"):
+            # If the user is on a closed cluster and presses left/right, shift the memory manually
+            if "from_cluster" in direction:
+                idx = self.engine.doc_keys.index(key)
+                if direction.startswith("left") and idx > 0:
+                    key = self.engine.doc_keys[idx - 1]
+                elif direction.startswith("right") and idx < len(self.engine.doc_keys) - 1:
+                    key = self.engine.doc_keys[idx + 1]
+                self.active_column_key = key
+
+            # Carousel Auto-Scrolling Logic
             target_idx = self.engine.doc_keys.index(key)
             visible_end = self.current_start_index + self.visible_columns_count - 1
 
@@ -337,23 +372,28 @@ class ComparisonTab(QWidget):
             elif target_idx > visible_end:
                 self.current_start_index = target_idx - self.visible_columns_count + 1
                 self.update_carousel_view()
+            return  # Left/Right doesn't move vertically
 
-        else:
-            # --- VERTICAL NAVIGATION (Jumping between Clusters) ---
-            idx = self.cluster_layout.indexOf(source_widget)
-            target_idx = idx - 1 if direction == "up" else idx + 1
+        # --- VERTICAL NAVIGATION (Jumping between Clusters) ---
+        idx = self.cluster_layout.indexOf(source_widget)
+        target_idx = idx - 1 if direction == "up" else idx + 1
 
-            if 0 <= target_idx < self.cluster_layout.count():
-                target_widget = self.cluster_layout.itemAt(target_idx).widget()
+        if 0 <= target_idx < self.cluster_layout.count():
+            target_widget = self.cluster_layout.itemAt(target_idx).widget()
 
-                # Skip over the "Nieuwe cluster toevoegen" button if it's in the layout
-                if isinstance(target_widget, QPushButton):
-                    target_idx = target_idx - 1 if direction == "up" else target_idx + 1
-                    if 0 <= target_idx < self.cluster_layout.count():
-                        target_widget = self.cluster_layout.itemAt(target_idx).widget()
-                    else:
-                        return
+            # Skip over the add Cluster button if it's in the layout
+            if isinstance(target_widget, QPushButton):
+                target_idx = target_idx - 1 if direction == "up" else target_idx + 1
+                if 0 <= target_idx < self.cluster_layout.count():
+                    target_widget = self.cluster_layout.itemAt(target_idx).widget()
+                else:
+                    return
 
+            # approved cluster? => highlight the WHOLE cluster
+            if getattr(target_widget, 'is_approved', False):
+                target_widget.setFocus()
+                self.handle_scroll_request(target_widget)
+            else:
                 target_list = target_widget.lists[key]
                 target_list.setFocus()
 
