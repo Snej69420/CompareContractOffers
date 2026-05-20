@@ -59,6 +59,10 @@ class ShortcutDialog(QDialog):
                 <td align='right'><span style='{k_style}'>Shift</span> + <span style='{k_style}'>Del</span></td>
                 <td style='padding-left: 10px; color: #444;'>Huidige cluster verwijderen</td>
             </tr>
+            <tr>
+                <td align='right'><span style='{k_style}'>I</span></td>
+                <td style='padding-left: 10px; color: #444;'>Includeer/Excludeer de Cluster in/uit de Vergelijking</td>
+            </tr>
         </table>
         """
 

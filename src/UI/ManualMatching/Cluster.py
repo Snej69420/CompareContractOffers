@@ -58,7 +58,7 @@ class Cluster(BaseCluster):
 
         self.exclude_btn = QPushButton()
         self.exclude_btn.setIcon(self.included_icon)
-        self.exclude_btn.setToolTip("Item opgenomen in vergelijking")
+        self.exclude_btn.setToolTip("Cluster opgenomen in vergelijking")
         self.exclude_btn.setStyleSheet(button_style)
         self.exclude_btn.clicked.connect(lambda: self.excludeToggled.emit(self.cluster_id))
 
@@ -141,10 +141,10 @@ class Cluster(BaseCluster):
 
         if cluster_data.is_excluded:
             self.exclude_btn.setIcon(self.excluded_icon)
-            self.exclude_btn.setToolTip("Item niet opgenomen in vergelijking")
+            self.exclude_btn.setToolTip("Cluster niet opgenomen in vergelijking")
         else:
             self.exclude_btn.setIcon(self.included_icon)
-            self.exclude_btn.setToolTip("Item opgenomen in vergelijking")
+            self.exclude_btn.setToolTip("Cluster opgenomen in vergelijking")
 
         # 3. Scale height dynamically
         max_items = max([len(lst) for lst in cluster_data.items.values()] + [1])
