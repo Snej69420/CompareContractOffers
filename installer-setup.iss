@@ -3,10 +3,10 @@
 ; Do not use the same AppId value in installers for other applications.
 AppId={{CE86C04C-2512-4C8E-A9FD-1DDDCD926822}
 AppName=Offerte Vergelijker
-AppVersion=1.0.0
+AppVersion=1.1.0
 ; This displays your name in the "Add/Remove Programs" list
-VersionInfoVersion=1.0.0.0
-VersionInfoProductVersion=1.0.0.0
+VersionInfoVersion=1.1.0.0
+VersionInfoProductVersion=1.1.0.0
 VersionInfoProductName=Offerte Vergelijker
 VersionInfoCompany=Steen Vastgoed (Beego)
 VersionInfoDescription=Offerte Vergelijker Setup
