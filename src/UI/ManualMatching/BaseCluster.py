@@ -1,4 +1,4 @@
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QPushButton
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QPushButton, QSizePolicy
 from PySide6.QtCore import Signal, Qt, QSize, QTimer, QItemSelectionModel
 from src.UI.ManualMatching.DraggableItemList import DraggableItemList
 
@@ -16,12 +16,12 @@ class BaseCluster(QFrame):
         self.setFrameStyle(QFrame.Shape.StyledPanel | QFrame.Shadow.Raised)
 
         self.layout = QVBoxLayout(self)
-        # ---> FIX 1: Neutralize hidden Qt margins to fix the visual drift <---
         self.layout.setContentsMargins(0, 0, 0, 0)
+
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
 
         # Header Setup
         self.header_layout = QHBoxLayout()
-        # ---> FIX 2: Explicitly give the title its own breathing room <---
         self.header_layout.setContentsMargins(10, 10, 10, 5)
 
         self.icon_label = QPushButton()
@@ -32,6 +32,8 @@ class BaseCluster(QFrame):
         self.header_layout.addWidget(self.icon_label)
 
         self.title_label = QLabel(title_text)
+        self.title_label.setWordWrap(True)
+        self.title_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.header_layout.addWidget(self.title_label)
         self.header_layout.addStretch()
 
@@ -40,7 +42,6 @@ class BaseCluster(QFrame):
         # --- DYNAMIC LIST GENERATION ---
         self.lists_widget = QWidget()
         lists_layout = QHBoxLayout(self.lists_widget)
-        # ---> FIX 3: Ensure lists layout has zero hidden margins <---
         lists_layout.setContentsMargins(0, 0, 0, 0)
         self.lists = {}
 

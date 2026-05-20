@@ -1,9 +1,10 @@
-from PySide6.QtWidgets import QPushButton, QMessageBox
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QIcon, QShortcut, QKeySequence
+from PySide6.QtWidgets import QPushButton, QMessageBox, QApplication
+from PySide6.QtCore import Qt, Signal, QPoint, QTimer
+from PySide6.QtGui import QIcon, QShortcut, QKeySequence, QCursor
 
 from src.UI.Utils import get_asset_path
 from src.UI.ManualMatching.BaseCluster import BaseCluster
+from src.UI.ManualMatching.ClusterTooltip import ClusterTooltip
 from src.UI.DataProcessing.MatchingEngine import ClusterData  # Import our new data model
 
 
@@ -13,7 +14,7 @@ class Cluster(BaseCluster):
     itemsChanged = Signal(int) # Emits (cluster_id) when a Qt Drag&Drop happens inside this widget
     excludeToggled = Signal(int) # Emits (cluster_id) when a cluster is marked as excluded
 
-    def __init__(self, cluster_id: int, doc_keys: list[str]):
+    def __init__(self, cluster_id: int, doc_keys: list[str], contractor_names: dict):
         # Pass the dynamic keys up to the BaseCluster
         super().__init__(f"Cluster {cluster_id}", doc_keys)
 
@@ -22,6 +23,16 @@ class Cluster(BaseCluster):
 
         self.cluster_id = cluster_id
         self.is_approved = False
+        self.contractor_names = contractor_names
+
+        self.quality_str = "?"
+        self.score_val = 0.0
+        self.title_display_mode = "all"
+
+        # Smart timer to prevent aggressive tooltip flashing when navigating fast
+        self.tooltip_timer = QTimer(self)
+        self.tooltip_timer.setSingleShot(True)
+        self.tooltip_timer.timeout.connect(self._show_tooltip)
 
         self.open_icon = QIcon(get_asset_path("assets/package-open.svg"))
         self.closed_icon = QIcon(get_asset_path("assets/package-closed.svg"))
@@ -87,6 +98,8 @@ class Cluster(BaseCluster):
         self.enter_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self.enter_shortcut.activated.connect(self.toggle_approve)
 
+        self.tooltip_popup = ClusterTooltip(contractor_names, self)
+
     def on_items_changed(self):
         """Overrides the BaseCluster drop handler to alert the parent that a drop happened."""
         self.itemsChanged.emit(self.cluster_id)
@@ -114,14 +127,13 @@ class Cluster(BaseCluster):
 
     def update_ui(self, cluster_data: ClusterData):
         """Receives pre-calculated data from the Engine and simply renders it."""
+        self.quality_str = cluster_data.quality
+        self.score_val = cluster_data.avg_score
 
-        # 1. Update Title with calculated scores
-        self.title_label.setText(
-            f"Cluster {self.cluster_id} | Zekerheid: {cluster_data.quality} ({cluster_data.avg_score:.0%})")
-
-        # 2. Rebuild the lists based purely on the Engine's sorting/data
+        # Rebuild the lists based purely on the Engine's sorting/data
         for key in self.doc_keys:
             self.lists[key].rebuild_ui(cluster_data.items[key])
+        self.refresh_title()
 
         if cluster_data.is_excluded:
             self.exclude_btn.setIcon(self.excluded_icon)
@@ -134,8 +146,40 @@ class Cluster(BaseCluster):
         max_items = max([len(lst) for lst in cluster_data.items.values()] + [1])
         self.adjust_list_heights(max_visible_rows=min(max_items, 6))
 
+    def _get_first_item_name(self) -> str | None:
+        """Returns the first available item name across all lists."""
+        for key in self.doc_keys:
+            items = self.lists[key].get_items()
+
+            if items:
+                return items[0].name
+
+        return None
+
+    def refresh_title(self):
+        """Updates the cluster header UI."""
+
+        if self.is_approved:
+            first_name = self._get_first_item_name()
+
+            display_name = first_name if first_name else "..."
+
+            self.title_label.setText(
+                f"Cluster {self.cluster_id} ({self.score_val:.0%}) | {display_name}"
+            )
+
+        else:
+            self.title_label.setText(
+                f"Cluster {self.cluster_id} | Zekerheid: "
+                f"{self.quality_str} ({self.score_val:.0%})"
+            )
+
+            self.tooltip_popup.hide()
+
     def toggle_approve(self):
         self.is_approved = not self.is_approved
+        self.refresh_title()
+
         if self.is_approved:
             self.lists_widget.setVisible(False)
             self.approve_btn.setText("Aanpassen")
@@ -162,6 +206,41 @@ class Cluster(BaseCluster):
             # Tell the parent tab to drop the cursor back into the correct list
             self.requestGlobalNavigation.emit(self, "", "open")
 
+    # ==========================================
+    # --- TOOLTIP HANDLING ---
+    # ==========================================
+    def focusInEvent(self, event):
+        super().focusInEvent(event)
+        if self.is_approved and event.reason() != Qt.FocusReason.MouseFocusReason:
+            self.tooltip_timer.start(100)
+
+    def _show_tooltip(self):
+        cluster_width = self.width()
+        target_width = int(cluster_width * 0.8)
+
+        self.tooltip_popup.populate(self.doc_keys, self.lists, target_width)
+        self.tooltip_popup.adjustSize()
+
+        tooltip_w = self.tooltip_popup.width()
+        tooltip_h = self.tooltip_popup.height()
+
+        x_offset = (cluster_width - tooltip_w) // 2
+        global_pos = self.mapToGlobal(QPoint(x_offset, 45))
+
+        screen_geo = QApplication.screenAt(QCursor.pos()).availableGeometry()
+        if global_pos.y() + tooltip_h > screen_geo.bottom():
+            global_pos.setY(self.mapToGlobal(QPoint(0, 0)).y() - tooltip_h - 5)
+
+        self.tooltip_popup.move(global_pos)
+        self.tooltip_popup.show()
+        self.tooltip_popup.raise_()
+
+    def focusOutEvent(self, event):
+        super().focusOutEvent(event)
+
+        self.tooltip_timer.stop()
+        self.tooltip_popup.hide()
+
     def mouseDoubleClickEvent(self, event):
         if self.is_approved:
             self.toggle_approve()
@@ -183,3 +262,13 @@ class Cluster(BaseCluster):
                 self.requestGlobalNavigation.emit(self, "", "right_from_cluster")
                 return
         super().keyPressEvent(event)
+
+    def enterEvent(self, event):
+        super().enterEvent(event)
+        if self.is_approved:
+            self.tooltip_timer.start(50)
+
+    def leaveEvent(self, event):
+        super().leaveEvent(event)
+        self.tooltip_timer.stop()
+        self.tooltip_popup.hide()

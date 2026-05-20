@@ -1,12 +1,13 @@
-from PySide6.QtWidgets import QWidget, QHBoxLayout, QPushButton, QLabel, QSizePolicy
-from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QPushButton, QLabel, QSizePolicy, QListWidget, QApplication
+from PySide6.QtCore import Qt, QPoint
 
 from src.UI.Utils import get_asset_path
 from src.UI.ManualMatching.MatchItem import MatchItem
+from src.UI.ManualMatching.ItemTooltip import ProductTooltip
 from src.UI.Settings import settings
 
 class ProductItem(QWidget):
-    def __init__(self, match_item: MatchItem, eject_callback=None):  # Added callback
+    def __init__(self, match_item: MatchItem, eject_callback=None):
         super().__init__()
         self.match_item = match_item
 
@@ -33,7 +34,7 @@ class ProductItem(QWidget):
         self.eject_btn = QPushButton()
         self.eject_btn.setFixedSize(22, 22)
         self.eject_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.eject_btn.setToolTip("Verwijder uit cluster (Naar Parking Lot)")
+        self.eject_btn.setToolTip("Verwijder uit Cluster")
 
         self.eject_btn.setStyleSheet(f"""
             QPushButton {{
@@ -79,6 +80,8 @@ class ProductItem(QWidget):
         layout.addWidget(self.unit_lbl)
         layout.addWidget(self.eject_btn)
 
+        self.tooltip_widget = ProductTooltip(None)
+
     def _get_score_color(self, score: float) -> str:
         if score >= 0.70:
             return "#c8e6c9"  # Green
@@ -98,3 +101,44 @@ class ProductItem(QWidget):
             formatted_qty = str(self.match_item.qty)
 
         self.qty_lbl.setText(formatted_qty)
+
+    def _is_single_selection(self):
+        # Navigate to the parent list
+        parent = self.parent()
+        # Look for the QListWidget in the hierarchy
+        while parent and not isinstance(parent, QListWidget):
+            parent = parent.parent()
+
+        if parent and isinstance(parent, QListWidget):
+            return len(parent.selectedItems()) == 1
+        return True  # Default to True if no list found
+
+    def show_tooltip(self):
+        width = self.width()
+        score = self.match_item.current_score
+        name = self.match_item.name
+
+        self.tooltip_widget.update_content(name, score, width)
+        global_pos = self.mapToGlobal(QPoint(0, self.height() + 5))
+
+        screen_geo = QApplication.screenAt(global_pos).availableGeometry()
+        tooltip_height = self.tooltip_widget.height()
+
+        if global_pos.y() + tooltip_height > screen_geo.bottom():
+            item_top_global = self.mapToGlobal(QPoint(0, 0)).y()
+            global_pos.setY(item_top_global - tooltip_height - 5)
+
+        self.tooltip_widget.move(global_pos)
+        self.tooltip_widget.show()
+        self.tooltip_widget.adjustSize()
+
+    def hide_tooltip(self):
+        self.tooltip_widget.hide()
+
+    def enterEvent(self, event):
+        self.show_tooltip()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self.hide_tooltip()
+        super().leaveEvent(event)

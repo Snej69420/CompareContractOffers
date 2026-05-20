@@ -1,10 +1,9 @@
 from PySide6.QtWidgets import QListWidget, QListWidgetItem, QScrollArea, QApplication
-from PySide6.QtCore import Qt, Signal, QSize, QTimer
+from PySide6.QtCore import Qt, Signal, QSize, QTimer, QPoint
 from PySide6.QtGui import QCursor
 
 from src.UI.ManualMatching.MatchItem import MatchItem
 from src.UI.ManualMatching.ProductItem import ProductItem
-
 
 class DraggableItemList(QListWidget):
     itemDropped = Signal()
@@ -58,6 +57,7 @@ class DraggableItemList(QListWidget):
                 border-radius: 4px;
             }
         """)
+        self.currentItemChanged.connect(self._on_item_changed)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -215,9 +215,19 @@ class DraggableItemList(QListWidget):
                 if item_widget:
                     self.requestScrollTo.emit(item_widget)
 
+    def focusInEvent(self, event):
+        super().focusInEvent(event)
+        self._trigger_tooltip(self.currentItem())
+
     def focusOutEvent(self, event):
         """Clears the visual selection when the user navigates away from this list."""
         self.clearSelection()
+        current = self.currentItem()
+        if current:
+            widget = self.itemWidget(current)
+            if isinstance(widget, ProductItem):
+                widget.hide_tooltip()
+
         super().focusOutEvent(event)
 
     def get_items(self) -> list[MatchItem]:
@@ -239,9 +249,20 @@ class DraggableItemList(QListWidget):
             custom_widget = ProductItem(match_item, eject_callback=self.itemEjected.emit)
             li.setSizeHint(custom_widget.sizeHint())
             li.setData(Qt.ItemDataRole.UserRole, match_item)
-
-            # Shows the full uncut name + the fixed confidence score
-            full_name = match_item.name
-            li.setToolTip(f"{full_name}\n\nZekerheid: {match_item.current_score:.0%}\nSleep om aan te passen.")
-
             self.setItemWidget(li, custom_widget)
+
+    def _on_item_changed(self, current, previous):
+        if previous:
+            prev_widget = self.itemWidget(previous)
+            if isinstance(prev_widget, ProductItem):
+                prev_widget.hide_tooltip()
+
+        self._trigger_tooltip(current)
+
+    def _trigger_tooltip(self, item):
+        if not item or not self.hasFocus():
+            return
+
+        curr_widget = self.itemWidget(item)
+        if isinstance(curr_widget, ProductItem):
+            curr_widget.show_tooltip()

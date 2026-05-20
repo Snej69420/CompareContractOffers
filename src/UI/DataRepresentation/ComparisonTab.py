@@ -78,7 +78,7 @@ class ComparisonTab(QWidget):
         self.cluster_container = QWidget()
         self.cluster_layout = QVBoxLayout(self.cluster_container)
         self.cluster_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self.cluster_layout.setContentsMargins(0, 10, 0, 0)
+        # self.cluster_layout.setContentsMargins(0, 10, 0, 0)
         self.cluster_layout.setSpacing(10)
 
         self.scroll_area.setWidget(self.cluster_container)
@@ -119,7 +119,8 @@ class ComparisonTab(QWidget):
     # ==========================================
     # --- DATA INGRESS & EGRESS ---
     # ==========================================
-    def populate_from_ai(self, doc_keys: list[str], clusters: list[dict], lookup: dict, unmatched_dict: dict):
+    def populate_from_ai(self, doc_keys: list[str], clusters: list[dict], lookup: dict, unmatched_dict: dict, loaded_documents: dict = None):
+        self.loaded_documents = loaded_documents or {}
         self.engine.load_ai_data(doc_keys, clusters, lookup, unmatched_dict)
 
     def gather_current_state(self):
@@ -179,6 +180,15 @@ class ComparisonTab(QWidget):
     # ==========================================
     # --- UI RENDERING METHODS ---
     # ==========================================
+    def _get_contractor_name(self, doc_key: str) -> str:
+        if hasattr(self, 'loaded_documents') and self.loaded_documents:
+            for path, df in self.loaded_documents.items():
+                if str(path) == doc_key or getattr(path, 'name', '') == doc_key:
+                    contractor = df.attrs.get('contractor')
+                    if contractor and str(contractor).strip() and str(contractor).lower() != "nan":
+                        return str(contractor).strip()
+        return ""
+
     def _build_entire_ui(self):
         self.add_cluster_btn.setEnabled(True)
         self.current_start_index = 0  # Reset carousel on new load
@@ -190,7 +200,8 @@ class ComparisonTab(QWidget):
 
         # 2. Rebuild Headers
         for key in self.engine.doc_keys:
-            lbl = QLabel(key)
+            display_name = self._get_contractor_name(key)
+            lbl = QLabel(display_name)
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             lbl.setStyleSheet(
                 "font-weight: bold; font-size: 14px; padding: 6px; background-color: #d1d9e6; border-radius: 4px; color: #333;")
@@ -230,7 +241,8 @@ class ComparisonTab(QWidget):
         QTimer.singleShot(0, self._recalculate_column_count)
 
     def _create_cluster_widget(self, cluster_id: int):
-        widget = Cluster(cluster_id, self.engine.doc_keys)
+        contractor_mapping = {key: self._get_contractor_name(key) for key in self.engine.doc_keys}
+        widget = Cluster(cluster_id, self.engine.doc_keys, contractor_mapping)
 
         widget.clusterRemoved.connect(self.engine.delete_cluster)
         widget.itemEjected.connect(lambda item, c_id: self.engine.move_item(item, c_id, None))
@@ -336,7 +348,6 @@ class ComparisonTab(QWidget):
                 target_widget.select_items(match_items)
 
     def handle_global_navigation(self, source_widget, key, direction):
-        # 1. Update Column Memory (Fallback to memory if the signal sent "" from an approved cluster)
         if key:
             self.active_column_key = key
         else:
