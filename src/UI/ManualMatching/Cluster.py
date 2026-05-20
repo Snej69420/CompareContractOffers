@@ -5,7 +5,7 @@ from PySide6.QtGui import QIcon, QShortcut, QKeySequence, QCursor
 from src.UI.Utils import get_asset_path
 from src.UI.ManualMatching.BaseCluster import BaseCluster
 from src.UI.ManualMatching.ClusterTooltip import ClusterTooltip
-from src.UI.DataProcessing.MatchingEngine import ClusterData  # Import our new data model
+from src.UI.DataProcessing.MatchingEngine import ClusterData
 
 
 class Cluster(BaseCluster):
@@ -81,6 +81,10 @@ class Cluster(BaseCluster):
         # Wire up ejection logic from the dynamically generated lists
         for lst in self.lists.values():
             lst.itemEjected.connect(self._handle_eject)
+
+        self.exclude_shortcut = QShortcut(QKeySequence("I"), self)
+        self.exclude_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self.exclude_shortcut.activated.connect(lambda: self.excludeToggled.emit(self.cluster_id))
 
         self.del_shortcut = QShortcut(QKeySequence("Shift+Del"), self)
         self.del_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)

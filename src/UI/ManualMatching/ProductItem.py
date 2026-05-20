@@ -121,7 +121,11 @@ class ProductItem(QWidget):
         self.tooltip_widget.update_content(name, score, width)
         global_pos = self.mapToGlobal(QPoint(0, self.height() + 5))
 
-        screen_geo = QApplication.screenAt(global_pos).availableGeometry()
+        screen = QApplication.screenAt(global_pos)
+        if not screen:
+            screen = QApplication.primaryScreen()
+        screen_geo = screen.availableGeometry()
+
         tooltip_height = self.tooltip_widget.height()
 
         if global_pos.y() + tooltip_height > screen_geo.bottom():

@@ -76,44 +76,26 @@ class DraggableItemList(QListWidget):
 
     @staticmethod
     def _handle_shared_auto_scroll():
-        """A global tracker that evaluates the cursor completely independent of list hover states."""
         scroll_area = DraggableItemList.active_scroll_area
-        if not scroll_area:
+        if not scroll_area or not scroll_area.isVisible():
             DraggableItemList.shared_scroll_timer.stop()
             return
 
-        # Stop when item unselected
-        if not (QApplication.mouseButtons() & Qt.MouseButton.LeftButton):
-            DraggableItemList.shared_scroll_timer.stop()
-            return
-
+        # Use the viewport of the SCROLL AREA, not the list
         viewport = scroll_area.viewport()
-        if not viewport:
-            return
-
         global_pos = QCursor.pos()
         local_pos = viewport.mapFromGlobal(global_pos)
+
         y = local_pos.y()
-        scroll_zone = 100
+        view_h = viewport.height()
 
-        if local_pos.x() < -100 or local_pos.x() > viewport.width() + 100:
-            DraggableItemList.shared_scroll_timer.stop()
-            return
-
-        vbar = scroll_area.verticalScrollBar()
-
-        if y < scroll_zone:
-            # Dynamic speed: Scales from 3px up to 25px per tick based on closeness to edge
-            speed = int(((scroll_zone - y) / scroll_zone) * 25)
-            vbar.setValue(vbar.value() - max(3, speed))
-
-        elif y > viewport.height() - scroll_zone:
-            speed = int(((y - (viewport.height() - scroll_zone)) / scroll_zone) * 25)
-            vbar.setValue(vbar.value() + max(3, speed))
-
-        else:
-            # Mouse is resting in the safe middle zone
-            DraggableItemList.shared_scroll_timer.stop()
+        # Increase the sensitivity zone or check if we are near the edges of the AREA
+        if y < 50:  # Top of the whole scrollable area
+            vbar = scroll_area.verticalScrollBar()
+            vbar.setValue(vbar.value() - 15)
+        elif y > view_h - 50:  # Bottom of the whole scrollable area
+            vbar = scroll_area.verticalScrollBar()
+            vbar.setValue(vbar.value() + 15)
 
     # ==========================================
     # --- DRAG & DROP EVENTS ---
