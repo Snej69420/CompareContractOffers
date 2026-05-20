@@ -111,7 +111,7 @@ class MainWindow(QMainWindow):
         doc_keys = list(unmatched_dict.keys())
 
         #  Pass them to the N-document generalized ComparisonTab
-        self.tab_manager.comparison_tab.populate_from_ai(doc_keys, clusters, lookup, unmatched_dict)
+        self.tab_manager.comparison_tab.populate_from_ai(doc_keys, clusters, lookup, unmatched_dict, self.loaded_documents)
 
     def on_ai_error(self, err_msg: str):
         self.top_bar.set_status(f"Foutmelding: {err_msg}")
@@ -188,6 +188,16 @@ if __name__ == "__main__":
     palette.setColor(QPalette.ColorRole.Button, QColor(240, 240, 240))
     palette.setColor(QPalette.ColorRole.ButtonText, Qt.GlobalColor.black)
     app.setPalette(palette)
+
+    app.setStyleSheet("""
+        QToolTip {
+            background-color: #ffffff;
+            color: #1e293b;
+            border: 1px solid #cbd5e1;
+            border-radius: 4px;
+            padding: 8px;
+        }
+    """)
 
     window = MainWindow()
     window.resize(1200, 800)
